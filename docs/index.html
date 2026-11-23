@@ -332,12 +332,12 @@
     const SUPABASE_URL = "https://hebkkckxyiokxzuttchq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_vfCYd9Uc7GIs7IeW2I86Lg_SxeSNoc4";
 
-    const REFRESH_MS = 30_000;  // polling di riserva; con Realtime attivo i dati arrivano subito
+    const REFRESH_MS = 60_000;  // ricarica completa ogni minuto; con Realtime attivo i dati arrivano anche prima
 
     // Cadenza dello scheduler: deve corrispondere a supabase/scheduler.sql (cron '*/5 13-20 * * 1-5', idle 12 min)
-    const SCHED = { everyMin: 5, fromHourUtc: 13, toHourUtc: 20, idleMin: 12 };
+    const SCHED = { everyMin: 1, fromHourUtc: 13, toHourUtc: 20, idleMin: 5 };
     // Valori di default del bot, usati solo finché la tabella bot_status non riporta quelli reali
-    const BOT_DEFAULTS = { refreshSec: 60, tradeMin: 5, sessionMaxMin: 340 };
+    const BOT_DEFAULTS = { refreshSec: 60, tradeMin: 1, sessionMaxMin: 340 };
 
     // ------------------------------------------------------------------ //
     // Formattazione

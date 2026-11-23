@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     SESSION_MODE: bool = False  # False = run singolo (locale / manuale); True = ciclo continuo (GitHub automatico)
     REFRESH_INTERVAL_SEC: int = Field(default=60, ge=30, le=600)  # equity + P&L + stop dinamici
-    TRADE_INTERVAL_MIN: int = Field(default=5, ge=1, le=120)  # screening + nuovi trade
+    TRADE_INTERVAL_MIN: int = Field(default=1, ge=1, le=120)  # screening + nuovi trade (ogni minuto)
     SESSION_MAX_MINUTES: int = Field(default=340, ge=5, le=350)  # i job GitHub durano al massimo 360 min
     SESSION_WAIT_FOR_OPEN_MIN: int = Field(default=20, ge=0, le=120)
 

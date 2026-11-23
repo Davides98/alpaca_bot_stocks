@@ -129,7 +129,8 @@ python -m pytest -q                 # test, nessuna chiamata di rete
 python -m src.main                  # un ciclo completo
 ```
 
-Il `.env.example` parte con `DRY_RUN=true`: pipeline completa (screening, regime, segnali, sizing, piano di chasing) senza inviare ordini.
+Di default `DRY_RUN=false`: il bot invia ordini all'account **paper**. Per una prova senza ordini imposta `DRY_RUN=true` nel `.env`:
+pipeline completa (screening, regime, segnali, sizing, piano di chasing) senza inviare ordini.
 Per provare a mercato chiuso aggiungi `IGNORE_MARKET_HOURS=true` (solo con `DRY_RUN=true`).
 
 Esempio di output dello screener:
@@ -155,7 +156,7 @@ Puoi usare **lo stesso progetto Supabase del bot opzioni**: tutte le tabelle di 
 
 ### Scheduler (avvio affidabile e gratuito)
 
-Come nel bot opzioni: ogni 5 minuti un job `pg_cron` controlla se il bot ha dato segni di vita negli ultimi 12 minuti e, se no,
+Come nel bot opzioni, ma **ogni minuto**: un job `pg_cron` controlla se il bot ha dato segni di vita negli ultimi 5 minuti e, se no,
 avvia il workflow tramite l'API di GitHub.
 
 1. **Token GitHub:** puoi riusare quello del bot opzioni aggiungendo questo repository al suo *Repository access*
@@ -186,11 +187,11 @@ I due scheduler convivono: `select jobname from cron.job;` mostra `alpaca-bot-wa
    | `SUPABASE_SERVICE_ROLE_KEY` | chiave service_role / secret |
 
 3. **Test manuale:** Actions → *Run Stock Bot* → *Run workflow* con `dry_run` (e `ignore_market_hours` se il mercato è chiuso).
-4. **Dashboard:** Settings → Pages → *Deploy from a branch* → `main` / `docs`. In [`docs/index.html`](docs/index.html) `SUPABASE_URL`
+4. **Dashboard:** si aggiorna **ogni minuto** (e subito, via Supabase Realtime, quando il bot scrive). Settings → Pages → *Deploy from a branch* → `main` / `docs`. In [`docs/index.html`](docs/index.html) `SUPABASE_URL`
    e `SUPABASE_ANON_KEY` sono già quelli del progetto del bot opzioni (chiave *publishable*, pubblica per design); cambiali se usi un altro progetto.
 
-I run automatici partono in **modalità sessione**: aggiornamento ogni 60 s (equity, P&L, protezione, stop dinamici),
-screening e nuovi trade ogni 5 minuti, chiusura automatica dopo 340 minuti o a mercato chiuso. Il cron orario di GitHub
+I run automatici partono in **modalità sessione**: **ogni minuto** il bot aggiorna equity e P&L, controlla protezione e stop dinamici,
+fa lo screening e apre nuovi trade (fino a 5 posizioni aperte, al massimo 2 nuove per ciclo), chiusura automatica dopo 340 minuti o a mercato chiuso. Il cron orario di GitHub
 (minuto :23, diverso dal bot opzioni) resta come riserva.
 
 ### Parametri configurabili da GitHub
@@ -217,7 +218,7 @@ Crea una **Variable** (o un Secret) con uno di questi nomi; se non esiste vale i
 | `NO_TRADE_AFTER_OPEN_MIN` / `NO_NEW_TRADES_BEFORE_CLOSE_MIN` | `15` / `15` | finestre senza nuovi trade |
 | `MAX_ENTRY_SLIPPAGE_PCT` / `MAX_EXIT_SLIPPAGE_PCT` | `0.002` / `0.005` | tetto di slippage del chasing |
 | `BARS_DATA_FEED` | `sip` | `iex` se l'account non ha accesso alle barre SIP |
-| `REFRESH_INTERVAL_SEC` / `TRADE_INTERVAL_MIN` | `60` / `5` | cadenze della sessione |
+| `REFRESH_INTERVAL_SEC` / `TRADE_INTERVAL_MIN` | `60` / `1` | cadenze della sessione (aggiornamento / screening e nuovi trade) |
 
 Tutti gli altri parametri di [`config/settings.py`](config/settings.py) sono sovrascrivibili via `.env` in locale.
 

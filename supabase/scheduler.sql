@@ -2,8 +2,9 @@
 -- Scheduler affidabile e gratuito: Supabase (pg_cron + pg_net) avvia il bot azionario su GitHub Actions.
 -- Stesso meccanismo del bot opzioni, con nomi distinti: i due scheduler convivono nello stesso progetto.
 --
--- Ogni 5 minuti (lun-ven, 13:00-20:59 UTC) controlla se il bot ha dato segni di vita negli ultimi
--- 12 minuti (stock_equity_snapshots, stock_bot_runs o stock_bot_status). Se no, avvia il workflow via API GitHub.
+-- OGNI MINUTO (lun-ven, 13:00-20:59 UTC) controlla se il bot ha dato segni di vita negli ultimi
+-- 5 minuti (stock_equity_snapshots, stock_bot_runs o stock_bot_status). Se no, avvia il workflow via API GitHub.
+-- Durante la sessione il bot scrive ogni minuto, quindi lo scheduler interviene solo se il bot si è fermato.
 --
 -- PREREQUISITI
 --   1. Aver eseguito supabase/schema.sql.
@@ -44,7 +45,9 @@ declare
     c_repo        constant text := 'Davides98/alpaca_bot_stocks';   -- <proprietario>/<repository>
     c_workflow    constant text := 'run_bot.yml';
     c_branch      constant text := 'main';
-    c_idle        constant interval := interval '12 minutes';
+    -- Il bot scrive un segnale ogni minuto; 5 minuti lasciano il tempo a un job GitHub appena avviato
+    -- (setup + test ~1-2 min) di dare il primo segno di vita senza richieste di avvio doppie.
+    c_idle        constant interval := interval '5 minutes';
     v_last        timestamptz;
     v_token       text;
     v_request_id  bigint;
@@ -87,9 +90,9 @@ $$;
 
 revoke all on function private.dispatch_stock_bot_if_idle() from public, anon, authenticated;
 
--- Job pg_cron: ogni 5 minuti, lun-ven, 13:00-20:59 UTC (festivi e orari esatti li gestisce il bot)
+-- Job pg_cron: OGNI MINUTO, lun-ven, 13:00-20:59 UTC (festivi e orari esatti li gestisce il bot)
 select cron.unschedule(jobid) from cron.job where jobname = 'alpaca-stock-bot-watchdog';
-select cron.schedule('alpaca-stock-bot-watchdog', '*/5 13-20 * * 1-5', $$select private.dispatch_stock_bot_if_idle()$$);
+select cron.schedule('alpaca-stock-bot-watchdog', '* 13-20 * * 1-5', $$select private.dispatch_stock_bot_if_idle()$$);
 
 -- ---------------------------------------------------------------------
 -- VERIFICHE (eseguile quando vuoi, una alla volta)

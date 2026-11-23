@@ -235,3 +235,22 @@ def test_reconcile_trade_closed_by_broker_stop():
     services(s, trading, storage, FakeMarket({})).risk.manage_open_positions()
     (tid, exit_price, pnl, reason), = storage.closed
     assert (tid, reason) == (9, "STOP_LOSS") and exit_price == pytest.approx(95.9) and pnl == pytest.approx(-41.0)
+
+
+def test_daily_bars_cache_downloads_once_per_day():
+    from src.data.market_data import MarketDataService
+
+    idx = pd.MultiIndex.from_product([["AAA"], pd.date_range("2025-01-02", periods=5, freq="B", tz="UTC")])
+    df = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}, index=idx)
+    calls = []
+
+    class Client:
+        def get_stock_bars(self, req):
+            calls.append(req.symbol_or_symbols)
+            return SimpleNamespace(df=df)
+
+    svc = MarketDataService(settings())
+    svc.stock_client = Client()
+    assert list(svc.get_daily_bars(["AAA", "BBB"])) == ["AAA"]
+    assert list(svc.get_daily_bars(["AAA", "BBB"])) == ["AAA"]  # tutto dalla cache, BBB non riprovato
+    assert calls == [["AAA", "BBB"]]

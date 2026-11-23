@@ -78,6 +78,8 @@ class MarketDataService:
         self.live_feed = DataFeed(settings.STOCK_DATA_FEED.lower())
         self.bars_feed = DataFeed(settings.BARS_DATA_FEED.lower())
         self._sip_failed = False
+        self._bars_cache: dict[str, pd.DataFrame] = {}
+        self._bars_day: date | None = None
 
     @property
     def bars_feed_used(self) -> DataFeed:
@@ -104,6 +106,22 @@ class MarketDataService:
         )
 
     def get_daily_bars(self, symbols: list[str]) -> dict[str, pd.DataFrame]:
+        """
+        Barre daily complete per ogni simbolo, con cache giornaliera: le barre complete cambiano solo
+        una volta al giorno, quindi lo screening ogni minuto non le riscarica (solo i simboli nuovi).
+        """
+        today = datetime.now(NEW_YORK).date()
+        if self._bars_day != today:
+            self._bars_cache.clear()
+            self._bars_day = today
+        missing = [s for s in symbols if s not in self._bars_cache]
+        if missing:
+            fetched = self._fetch_daily_bars(missing)
+            for s in missing:
+                self._bars_cache[s] = fetched.get(s, pd.DataFrame())  # vuoto = non disponibile (non riprovo oggi)
+        return {s: self._bars_cache[s] for s in symbols if not self._bars_cache[s].empty}
+
+    def _fetch_daily_bars(self, symbols: list[str]) -> dict[str, pd.DataFrame]:
         """Barre daily complete (open/high/low/close/volume) per ogni simbolo, ultime HISTORY_TRADING_DAYS."""
         if not symbols:
             return {}
