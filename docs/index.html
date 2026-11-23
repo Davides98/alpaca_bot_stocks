@@ -1,0 +1,1222 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Bot Dashboard</title>
+  <meta name="description" content="Dashboard didattica del bot azionario su Alpaca Paper Trading" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232a78d6'/><path d='M6 22l6-7 5 4 9-10' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f4f1;
+      --surface: #fcfcfb;
+      --surface-2: #f0efeb;
+      --border: rgba(11, 11, 11, 0.10);
+      --text: #0b0b0b;
+      --text-2: #52514e;
+      --muted: #898781;
+      --grid: #e1e0d9;
+      --series: #2a78d6;
+      --series-fill: rgba(42, 120, 214, 0.10);
+      --good: #0a8a0a;
+      --bad: #d03b3b;
+      --warn: #b07a00;
+      --accent-soft: rgba(42, 120, 214, 0.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #111110;
+        --surface: #1a1a19;
+        --surface-2: #232321;
+        --border: rgba(255, 255, 255, 0.10);
+        --text: #f0efec;
+        --text-2: #c3c2b7;
+        --muted: #898781;
+        --grid: #2c2c2a;
+        --series: #3987e5;
+        --series-fill: rgba(57, 135, 229, 0.14);
+        --good: #0ca30c;
+        --bad: #e66767;
+        --warn: #fab219;
+        --accent-soft: rgba(57, 135, 229, 0.18);
+      }
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #111110;
+      --surface: #1a1a19;
+      --surface-2: #232321;
+      --border: rgba(255, 255, 255, 0.10);
+      --text: #f0efec;
+      --text-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --series: #3987e5;
+      --series-fill: rgba(57, 135, 229, 0.14);
+      --good: #0ca30c;
+      --bad: #e66767;
+      --warn: #fab219;
+      --accent-soft: rgba(57, 135, 229, 0.18);
+    }
+    html, body { background: var(--bg); color: var(--text); }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+    .t2 { color: var(--text-2); }
+    .muted { color: var(--muted); }
+    .num { font-variant-numeric: tabular-nums; }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+    .seg button { padding: 4px 12px; border-radius: 7px; font-size: 13px; color: var(--text-2); }
+    .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .btn { border: 1px solid var(--border); background: var(--surface); border-radius: 9px; padding: 5px 12px; font-size: 13px; color: var(--text-2); }
+    .btn:hover { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    th.r, td.r { text-align: right; }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); color: var(--text-2); }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .pill.open { color: var(--series); background: var(--accent-soft); border-color: transparent; }
+    .pill.sel { color: var(--good); }
+    .scorebar { height: 6px; border-radius: 3px; background: var(--surface-2); width: 64px; overflow: hidden; display: inline-block; vertical-align: middle; }
+    .scorebar > span { display: block; height: 100%; border-radius: 3px; background: var(--series); }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+    .live-dot.on { background: var(--good); box-shadow: 0 0 0 3px rgba(12,163,12,.18); }
+    .pill.good { color: var(--good); }
+    .pill.bad { color: var(--bad); }
+    .pill.warn { color: var(--warn); }
+    .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+    .bar > span { display: block; height: 100%; border-radius: 3px; background: var(--series); transition: width .9s linear; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
+    .kv dt { color: var(--muted); white-space: nowrap; }
+    .kv dd { color: var(--text-2); min-width: 0; }
+    /* Pulsante "i" e scheda didattica della strategia */
+    .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+                border: 1px solid var(--border); background: var(--surface-2); color: var(--series); font: 600 11px/1 Georgia, serif;
+                font-style: italic; cursor: pointer; flex: none; }
+    .info-btn:hover, .info-btn:focus-visible { background: var(--accent-soft); outline: none; border-color: var(--series); }
+    dialog.sheet { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 0;
+                   width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+    dialog.sheet::backdrop { background: rgba(0, 0, 0, .45); }
+    .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 12px;
+                  border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+    .sheet-body { padding: 4px 20px 20px; font-size: 14px; }
+    .sheet-body h3 { font-weight: 600; font-size: 14px; margin: 18px 0 6px; color: var(--text); }
+    .sheet-body p { color: var(--text-2); line-height: 1.55; }
+    .sheet-body ul { list-style: disc; padding-left: 20px; color: var(--text-2); line-height: 1.55; }
+    .sheet-body li + li { margin-top: 3px; }
+    .sheet .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); color: var(--text-2); margin-right: 4px; }
+    .rule { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px; background: var(--surface-2); }
+    .rule strong { color: var(--text); }
+    .payoff { width: 100%; height: auto; display: block; margin-top: 8px; }
+    .side { font-size: 11px; font-weight: 600; letter-spacing: .03em; padding: 1px 7px; border-radius: 6px; }
+    .side.long { color: var(--good); background: rgba(12,163,12,.10); }
+    .side.short { color: var(--bad); background: rgba(208,59,59,.10); }
+    .matrix { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; font-size: 13.5px; }
+    .matrix .h { color: var(--muted); font-size: 12px; padding: 4px 2px; }
+    .matrix .cell { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .matrix .cell.none { color: var(--muted); }
+    .matrix .cell .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .levels { width: 100%; height: auto; display: block; margin-top: 6px; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6">
+
+    <!-- Header -->
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2 text-xs muted uppercase tracking-wider">
+          <span class="live-dot" id="liveDot" aria-hidden="true"></span>
+          <span id="liveLabel">Connessione…</span>
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-semibold mt-1">Alpaca Stock Bot</h1>
+        <p class="t2 text-sm mt-1">Paper trading a scopo didattico · regime di mercato + strategie azionarie (breakout, pullback, mean reversion)</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="btn" id="refreshBtn" type="button">Aggiorna</button>
+        <button class="btn" id="themeBtn" type="button" aria-label="Cambia tema">Tema</button>
+      </div>
+    </header>
+
+    <div id="configBanner" class="card p-4 text-sm hidden" role="alert" style="border-color: var(--warn);">
+      <strong>Configurazione da completare.</strong>
+      <span class="t2" id="configMsg"></span>
+    </div>
+    <div id="errorBanner" class="card p-4 text-sm hidden" role="alert" style="border-color: var(--bad);"></div>
+
+    <!-- KPI -->
+    <section aria-label="Indicatori principali" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="card p-5">
+        <div class="text-sm t2">Capitale attuale</div>
+        <div class="text-3xl font-semibold num mt-2" id="kpiEquity">–</div>
+        <div class="text-sm muted num mt-1">Iniziale <span id="kpiInitial">–</span></div>
+        <div class="text-xs muted num mt-1" id="kpiExposure">–</div>
+      </div>
+      <div class="card p-5">
+        <div class="text-sm t2">Rendimento totale</div>
+        <div class="text-3xl font-semibold num mt-2" id="kpiReturnPct">–</div>
+        <div class="text-sm num mt-1" id="kpiReturnUsd">–</div>
+      </div>
+      <div class="card p-5">
+        <div class="text-sm t2">P&amp;L giornaliero</div>
+        <div class="text-3xl font-semibold num mt-2" id="kpiDaily">–</div>
+        <div class="text-sm muted mt-1">vs chiusura precedente</div>
+      </div>
+      <div class="card p-5">
+        <div class="text-sm t2">Ultimo run del bot</div>
+        <div class="text-xl font-semibold num mt-2" id="kpiUpdated">–</div>
+        <div class="text-sm mt-1" id="kpiRunStatus">–</div>
+        <div class="text-xs muted mt-1" id="kpiUpdatedAgo">–</div>
+      </div>
+    </section>
+
+    <!-- Mercato e bot -->
+    <section aria-label="Mercato e bot" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="card p-5">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">Mercato USA</h2>
+          <span id="mktPill" class="pill">–</span>
+        </div>
+        <div class="text-sm t2 mt-3" id="mktCountLabel">–</div>
+        <div class="text-3xl sm:text-4xl font-semibold num mt-1" id="mktCount" aria-live="off">–</div>
+        <div class="bar mt-3" aria-hidden="true"><span id="mktBar" style="width:0%"></span></div>
+        <dl class="kv mt-4 text-sm" id="mktInfo"></dl>
+        <p class="text-xs muted mt-3" id="mktSource">–</p>
+      </div>
+      <div class="card p-5">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">Bot</h2>
+          <span id="botPill" class="pill">–</span>
+        </div>
+        <div class="text-sm t2 mt-3" id="botCountLabel">–</div>
+        <div class="text-3xl sm:text-4xl font-semibold num mt-1" id="botCount" aria-live="off">–</div>
+        <div class="bar mt-3" aria-hidden="true"><span id="botBar" style="width:0%"></span></div>
+        <dl class="kv mt-4 text-sm" id="botInfo"></dl>
+        <p class="text-xs muted mt-3" id="botSource">–</p>
+      </div>
+    </section>
+
+    <!-- Grafico -->
+    <section class="card p-5" aria-labelledby="chartTitle">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 id="chartTitle" class="text-base font-semibold">Andamento del capitale</h2>
+          <p class="text-sm muted" id="chartSubtitle">Equity dell'account paper per ogni aggiornamento del bot</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="seg" role="group" aria-label="Intervallo temporale" id="rangeSeg">
+            <button type="button" data-range="7">1S</button>
+            <button type="button" data-range="30">1M</button>
+            <button type="button" data-range="90">3M</button>
+            <button type="button" data-range="0" aria-pressed="true">Tutto</button>
+          </div>
+          <div class="seg" role="group" aria-label="Unità" id="unitSeg">
+            <button type="button" data-unit="usd" aria-pressed="true">$</button>
+            <button type="button" data-unit="pct">%</button>
+          </div>
+        </div>
+      </div>
+      <div class="relative" style="height: 320px;">
+        <canvas id="equityChart" role="img" aria-label="Grafico a linea dell'equity nel tempo"></canvas>
+        <div id="chartEmpty" class="absolute inset-0 hidden items-center justify-center text-center text-sm muted px-6">Nessuno snapshot disponibile: esegui il bot almeno una volta.</div>
+      </div>
+      <details class="mt-4 text-sm">
+        <summary class="cursor-pointer t2">Mostra i dati in tabella</summary>
+        <div class="table-wrap mt-2" style="max-height: 280px; overflow-y: auto;">
+          <table>
+            <thead><tr><th>Data</th><th class="r">Equity</th><th class="r">Rendimento</th><th class="r">P&amp;L giorno</th></tr></thead>
+            <tbody id="equityTable"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <!-- Trade -->
+    <section class="card" aria-labelledby="tradesTitle">
+      <div class="flex flex-wrap items-center justify-between gap-3 p-5 pb-3">
+        <div>
+          <h2 id="tradesTitle" class="text-base font-semibold">Posizioni aperte e storico trade</h2>
+          <p class="text-sm muted" id="tradesSummary">–</p>
+        </div>
+        <div class="seg" role="group" aria-label="Filtro stato" id="statusSeg">
+          <button type="button" data-status="ALL" aria-pressed="true">Tutti</button>
+          <button type="button" data-status="OPEN">Aperti</button>
+          <button type="button" data-status="CLOSED">Chiusi</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Apertura</th><th>Ticker</th><th>Strategia</th><th class="r">Qty</th>
+              <th class="r">Entrata</th><th class="r">Stop / Target</th><th class="r">Attuale / Uscita</th>
+              <th class="r">Rischio iniziale</th><th class="r">R</th><th class="r">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTable"></tbody>
+        </table>
+      </div>
+      <p class="text-xs muted px-5 py-3" style="border-top: 1px solid var(--border);">
+        <strong class="t2">Stop / Target</strong>: livelli dell'ordine OCO che protegge la posizione lato broker (attivo anche a bot spento);
+        se lo stop è stato spostato (breakeven o trailing) sotto compare quello iniziale.
+        <strong class="t2">Rischio iniziale</strong>: perdita allo stop iniziale = |entrata − stop| × azioni (1R), e la sua % sul capitale.
+        <strong class="t2">R</strong>: profitto espresso in multipli del rischio iniziale (+2R = guadagnato il doppio di quanto si rischiava).
+        Eventuali commissioni o costi di prestito titoli (short) non sono inclusi.
+      </p>
+    </section>
+
+    <!-- Matrice -->
+    <section class="card p-5" aria-labelledby="matrixTitle">
+      <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div>
+          <h2 id="matrixTitle" class="text-base font-semibold">Matrice delle strategie</h2>
+          <p class="text-sm muted">Il regime (trend × volatilità) decide <em>cosa</em> fare, il segnale decide <em>quando</em>. Stessa logica del bot opzioni.</p>
+        </div>
+      </div>
+      <div class="matrix" id="matrix"></div>
+    </section>
+
+    <!-- Screening -->
+    <section class="card" aria-labelledby="screenTitle">
+      <div class="p-5 pb-3">
+        <h2 id="screenTitle" class="text-base font-semibold">Ultimo screening della watchlist</h2>
+        <p class="text-sm muted" id="screenSubtitle">–</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th><th class="r">Prezzo</th><th>Trend</th><th>Volatilità</th><th class="r">Vol Rank</th><th class="r">ADX</th>
+              <th class="r">RSI</th><th class="r">ATR</th><th>Score</th><th>Selezionato</th><th>Strategia / segnale / motivo</th>
+            </tr>
+          </thead>
+          <tbody id="screenTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <dialog id="stratDialog" class="sheet" aria-labelledby="stratTitle">
+      <div class="sheet-head">
+        <div>
+          <div class="text-xs muted uppercase tracking-wider">Scheda didattica</div>
+          <h2 id="stratTitle" class="text-lg font-semibold mt-1">–</h2>
+          <div id="stratTags" class="mt-2"></div>
+        </div>
+        <button class="btn" id="stratClose" type="button" aria-label="Chiudi la scheda">Chiudi</button>
+      </div>
+      <div id="stratBody" class="sheet-body"></div>
+    </dialog>
+
+    <footer class="text-xs muted text-center pb-4">
+      Progetto didattico. Nessun consiglio finanziario. Dati da Supabase (sola lettura, chiave anon).
+    </footer>
+  </main>
+
+  <script>
+    // =====================================================================
+    // CONFIGURAZIONE - compila questi due valori (Supabase -> Project Settings -> API)
+    //   SUPABASE_URL      : "Project URL", es. https://abcdefgh.supabase.co  (NON una chiave)
+    //   SUPABASE_ANON_KEY : chiave PUBBLICA "publishable" (sb_publishable_...) o legacy "anon" (eyJ...).
+    //                       NON usare MAI la secret / service_role key qui: questa pagina è pubblica.
+    //                       (Se lo fai, la pagina si rifiuta di partire.)
+    // =====================================================================
+    const SUPABASE_URL = "https://hebkkckxyiokxzuttchq.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_vfCYd9Uc7GIs7IeW2I86Lg_SxeSNoc4";
+
+    const REFRESH_MS = 30_000;  // polling di riserva; con Realtime attivo i dati arrivano subito
+
+    // Cadenza dello scheduler: deve corrispondere a supabase/scheduler.sql (cron '*/5 13-20 * * 1-5', idle 12 min)
+    const SCHED = { everyMin: 5, fromHourUtc: 13, toHourUtc: 20, idleMin: 12 };
+    // Valori di default del bot, usati solo finché la tabella bot_status non riporta quelli reali
+    const BOT_DEFAULTS = { refreshSec: 60, tradeMin: 5, sessionMaxMin: 340 };
+
+    // ------------------------------------------------------------------ //
+    // Formattazione
+    // ------------------------------------------------------------------ //
+    const usd = new Intl.NumberFormat("it-IT", { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 2 });
+    const usd0 = new Intl.NumberFormat("it-IT", { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 });
+    const num2 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const dtFmt = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    const dFmt = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
+    const tFmt = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" });
+    const dtShortFmt = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const signed = (v, fmt) => (v > 0 ? "+" : v < 0 ? "−" : "") + fmt(Math.abs(v));
+    const arrow = (v) => (v > 0 ? "▲ " : v < 0 ? "▼ " : "");
+    const cls = (v) => (v > 0 ? "good" : v < 0 ? "bad" : "t2");
+    const fmtUsd = (v) => signed(v, (x) => usd.format(x));
+    const fmtPct = (v) => signed(v, (x) => num2.format(x) + "%");
+    const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    function timeAgo(date) {
+      const s = Math.round((Date.now() - date.getTime()) / 1000);
+      if (s < 60) return "pochi secondi fa";
+      const m = Math.round(s / 60);
+      if (m < 60) return `${m} min fa`;
+      const h = Math.round(m / 60);
+      if (h < 48) return `${h} ore fa`;
+      return `${Math.round(h / 24)} giorni fa`;
+    }
+
+    // ------------------------------------------------------------------ //
+    // Stato
+    // ------------------------------------------------------------------ //
+    const state = { snapshots: [], trades: [], screening: [], unit: "usd", rangeDays: 0, status: "ALL" };
+    let chart = null;
+    let db = null;
+
+    // Controlli di configurazione: placeholder, URL al posto della chiave (o viceversa), chiave segreta esposta
+    function jwtRole(key) {
+      try { return JSON.parse(atob(key.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role; } catch (_) { return null; }
+    }
+    function configProblem() {
+      if (SUPABASE_ANON_KEY.startsWith("sb_secret_") || jwtRole(SUPABASE_ANON_KEY) === "service_role")
+        return "<strong>Hai inserito la chiave SEGRETA</strong>: rimuovila subito da questo file, rigenerala su Supabase e usa la chiave <em>publishable</em> / <em>anon</em>.";
+      if (SUPABASE_URL.includes("YOUR-PROJECT") || SUPABASE_ANON_KEY.includes("YOUR-ANON-KEY"))
+        return "Apri <code>docs/index.html</code> e compila <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> (vedi README).";
+      if (!/^https:\/\/\S+$/.test(SUPABASE_URL))
+        return "<code>SUPABASE_URL</code> deve essere l'indirizzo del progetto, es. <code>https://abcdefgh.supabase.co</code> (non una chiave).";
+      return null;
+    }
+    const problem = configProblem();
+    const configured = problem === null;
+
+    // ------------------------------------------------------------------ //
+    // Dati
+    // ------------------------------------------------------------------ //
+    async function fetchAllSnapshots() {
+      const pageSize = 1000;
+      let from = 0, rows = [];
+      while (true) {
+        const { data, error } = await db.from("stock_equity_snapshots").select("*")
+          .order("timestamp", { ascending: true }).range(from, from + pageSize - 1);
+        if (error) throw error;
+        rows = rows.concat(data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return rows;
+    }
+
+    async function fetchLatestScreening() {
+      const { data: last, error } = await db.from("stock_screening_logs").select("run_id,timestamp")
+        .order("timestamp", { ascending: false }).limit(1);
+      if (error) throw error;
+      if (!last.length) return [];
+      // Tutte le righe di un ciclo hanno lo stesso timestamp. Non filtro per run_id: in modalità sessione
+      // il run_id resta uguale per tutta la giornata e mostrerebbe tutti i cicli insieme.
+      const { data, error: e2 } = await db.from("stock_screening_logs").select("*")
+        .eq("timestamp", last[0].timestamp).order("opportunity_score", { ascending: false });
+      if (e2) throw e2;
+      return data;
+    }
+
+    // Ultimo run registrato dal bot (tabella bot_runs). Se la tabella non esiste ancora, ritorna null.
+    async function fetchLastRun() {
+      const { data, error } = await db.from("stock_bot_runs").select("*").order("timestamp", { ascending: false }).limit(1);
+      if (error) { console.warn("bot_runs non disponibile:", error.message); return null; }
+      return data[0] ? { ...data[0], t: new Date(data[0].timestamp) } : null;
+    }
+
+    // Stato attuale del bot (tabella bot_status, una riga). Se la tabella non esiste ancora, ritorna null.
+    async function fetchBotStatus() {
+      const { data, error } = await db.from("stock_bot_status").select("*").eq("id", 1).maybeSingle();
+      state.botStatusMissing = !!error;
+      if (error) { console.warn("bot_status non disponibile:", error.message); return null; }
+      return data;
+    }
+
+    async function loadAll() {
+      try {
+        const [snapshots, tradesRes, screening, lastRun, botStatus] = await Promise.all([
+          fetchAllSnapshots(),
+          db.from("stock_trades").select("*").order("created_at", { ascending: false }).limit(500),
+          fetchLatestScreening(),
+          fetchLastRun(),
+          fetchBotStatus(),
+        ]);
+        if (tradesRes.error) throw tradesRes.error;
+        state.snapshots = snapshots.map((r) => ({ ...r, t: new Date(r.timestamp) }));
+        state.trades = tradesRes.data;
+        state.screening = screening;
+        state.lastRun = lastRun;
+        state.botStatus = botStatus;
+        $("errorBanner").classList.add("hidden");
+        renderAll();
+      } catch (err) {
+        console.error(err);
+        const box = $("errorBanner");
+        box.innerHTML = `<strong>Errore nel caricamento dei dati.</strong> <span class="t2">${esc(err.message || err)}</span>`;
+        box.classList.remove("hidden");
+      }
+    }
+
+    // ------------------------------------------------------------------ //
+    // Render: KPI
+    // ------------------------------------------------------------------ //
+    const RUN_STATUS = {
+      OK: { icon: "✓", label: "Completato", cls: "good" },
+      MARKET_CLOSED: { icon: "☾", label: "Mercato chiuso", cls: "t2" },
+      CONFIG_ERROR: { icon: "✕", label: "Errore di configurazione", cls: "bad" },
+      AUTH_ERROR: { icon: "✕", label: "Credenziali Alpaca rifiutate", cls: "bad" },
+      ERROR: { icon: "✕", label: "Errore", cls: "bad" },
+    };
+
+    function renderLastRun() {
+      const run = state.lastRun, last = state.snapshots.at(-1);
+      if (run) {
+        const st = RUN_STATUS[run.status] || { icon: "•", label: run.status, cls: "t2" };
+        $("kpiUpdated").textContent = dtFmt.format(run.t);
+        $("kpiRunStatus").innerHTML = `<span class="${st.cls}">${st.icon} ${esc(st.label)}</span>${run.dry_run ? ' <span class="muted text-xs">DRY_RUN</span>' : ""}`;
+        $("kpiRunStatus").title = run.message || "";
+        $("kpiUpdatedAgo").textContent = timeAgo(run.t) + (last ? ` · ultimo snapshot ${timeAgo(last.t)}` : "");
+      } else if (last) {
+        $("kpiUpdated").textContent = dtFmt.format(last.t);
+        $("kpiRunStatus").textContent = "";
+        $("kpiUpdatedAgo").textContent = timeAgo(last.t);
+      }
+      // Messaggio del grafico vuoto: distingue "bot mai partito" da "bot partito solo a mercato chiuso"
+      $("chartEmpty").textContent = !run
+        ? "Nessuno snapshot disponibile: esegui il bot almeno una volta."
+        : run.status === "MARKET_CLOSED"
+          ? `Il bot è attivo (ultimo run ${timeAgo(run.t)}), ma finora ha girato solo a mercato chiuso. Il primo snapshot arriverà al primo run con Wall Street aperta (15:30–22:00 ora italiana).`
+          : `Ultimo run: ${(RUN_STATUS[run.status] || {}).label || run.status} — ${run.message || ""}`;
+    }
+
+    function renderKpis() {
+      renderLastRun();
+      const last = state.snapshots.at(-1);
+      if (!last) return;
+      const equity = Number(last.equity), initial = Number(last.initial_capital);
+      const retUsd = Number(last.total_return_usd), retPct = Number(last.total_return_pct), daily = Number(last.daily_pnl);
+      $("kpiEquity").textContent = usd.format(equity);
+      $("kpiInitial").textContent = usd0.format(initial);
+      $("kpiReturnPct").innerHTML = `<span class="${cls(retPct)}">${arrow(retPct)}${fmtPct(retPct)}</span>`;
+      $("kpiReturnUsd").innerHTML = `<span class="${cls(retUsd)}">${fmtUsd(retUsd)}</span>`;
+      $("kpiDaily").innerHTML = `<span class="${cls(daily)}">${arrow(daily)}${fmtUsd(daily)}</span>`;
+      const lv = Number(last.long_market_value || 0), sv = Math.abs(Number(last.short_market_value || 0));
+      $("kpiExposure").textContent = `Investito: long ${usd0.format(lv)} · short ${usd0.format(sv)}`;
+    }
+
+    // ------------------------------------------------------------------ //
+    // Render: grafico
+    // ------------------------------------------------------------------ //
+    const crosshair = {
+      id: "crosshair",
+      afterDraw(c) {
+        const active = c.tooltip?.getActiveElements?.();
+        if (!active || !active.length) return;
+        const x = active[0].element.x, { top, bottom } = c.chartArea, ctx = c.ctx;
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+        ctx.lineWidth = 1; ctx.strokeStyle = cssVar("--muted"); ctx.setLineDash([3, 3]); ctx.stroke();
+        ctx.restore();
+      },
+    };
+    const baseline = {
+      id: "baseline",
+      beforeDatasetsDraw(c, _args, opts) {
+        const y = c.scales.y.getPixelForValue(opts.value);
+        if (y < c.chartArea.top || y > c.chartArea.bottom) return;
+        const ctx = c.ctx;
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(c.chartArea.left, y); ctx.lineTo(c.chartArea.right, y);
+        ctx.lineWidth = 1; ctx.strokeStyle = cssVar("--muted"); ctx.setLineDash([4, 4]); ctx.stroke();
+        ctx.fillStyle = cssVar("--muted"); ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right";
+        ctx.fillText(opts.label, c.chartArea.right - 4, y - 5);
+        ctx.restore();
+      },
+    };
+
+    function visibleSnapshots() {
+      if (!state.rangeDays) return state.snapshots;
+      const cutoff = Date.now() - state.rangeDays * 86_400_000;
+      return state.snapshots.filter((s) => s.t.getTime() >= cutoff);
+    }
+
+    function renderChart() {
+      const rows = visibleSnapshots();
+      const isPct = state.unit === "pct";
+      // Etichette dell'asse X: ora se i dati coprono meno di 1,5 giorni, data+ora fino a 10 giorni, altrimenti data
+      const spanH = rows.length > 1 ? (rows.at(-1).t - rows[0].t) / 3_600_000 : 0;
+      const xFmt = spanH < 36 ? tFmt : spanH < 240 ? dtShortFmt : dFmt;
+      $("chartEmpty").style.display = rows.length ? "none" : "flex";
+      $("equityChart").style.visibility = rows.length ? "visible" : "hidden";  // niente assi finti senza dati
+      $("chartSubtitle").textContent = isPct
+        ? "Rendimento % rispetto al capitale iniziale, per ogni aggiornamento del bot"
+        : "Equity dell'account paper per ogni aggiornamento del bot";
+      const values = rows.map((r) => Number(isPct ? r.total_return_pct : r.equity));
+      const initial = rows.length ? Number(rows[0].initial_capital) : 0;
+      const ref = isPct ? { value: 0, label: "0%" } : { value: initial, label: "Capitale iniziale" };
+      const text2 = cssVar("--text-2"), muted = cssVar("--muted"), grid = cssVar("--grid"), series = cssVar("--series");
+
+      const data = {
+        labels: rows.map((r) => r.t),
+        datasets: [{
+          label: isPct ? "Rendimento %" : "Equity",
+          data: values,
+          borderColor: series,
+          backgroundColor: cssVar("--series-fill"),
+          borderWidth: 2,
+          fill: "start",
+          tension: 0.25,
+          pointRadius: rows.length < 40 ? 2.5 : 0,
+          pointHoverRadius: 5,
+          pointHoverBorderWidth: 2,
+          pointHoverBorderColor: cssVar("--surface"),
+          pointBackgroundColor: series,
+        }],
+      };
+      const options = {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          baseline: ref,
+          tooltip: {
+            backgroundColor: cssVar("--surface"), titleColor: cssVar("--text"), bodyColor: text2,
+            borderColor: cssVar("--border"), borderWidth: 1, padding: 10, displayColors: false,
+            callbacks: {
+              title: (items) => dtFmt.format(items[0].label instanceof Date ? items[0].label : new Date(items[0].label)),
+              label: (item) => {
+                const r = rows[item.dataIndex];
+                return [`Equity: ${usd.format(Number(r.equity))}`, `Rendimento: ${fmtPct(Number(r.total_return_pct))} (${fmtUsd(Number(r.total_return_usd))})`];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "category",
+            grid: { display: false }, border: { color: grid },
+            ticks: { color: muted, maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+                     callback(v) { const d = this.getLabelForValue(v); return xFmt.format(d instanceof Date ? d : new Date(d)); } },
+          },
+          y: {
+            grid: { color: grid }, border: { display: false },
+            ticks: { color: muted, maxTicksLimit: 6, callback: (v) => (isPct ? num2.format(v) + "%" : usd0.format(v)) },
+            grace: "5%",
+          },
+        },
+      };
+      if (chart) { chart.data = data; chart.options = options; chart.update(); }
+      else chart = new Chart($("equityChart"), { type: "line", data, options, plugins: [crosshair, baseline] });
+
+      $("equityTable").innerHTML = rows.slice().reverse().slice(0, 200).map((r) => `
+        <tr><td class="num">${dtFmt.format(r.t)}</td>
+        <td class="r num">${usd.format(Number(r.equity))}</td>
+        <td class="r num ${cls(Number(r.total_return_pct))}">${fmtPct(Number(r.total_return_pct))}</td>
+        <td class="r num ${cls(Number(r.daily_pnl))}">${fmtUsd(Number(r.daily_pnl))}</td></tr>`).join("");
+    }
+
+    // ------------------------------------------------------------------ //
+    // Strategie: descrizioni didattiche
+    // ------------------------------------------------------------------ //
+    const prettyStrategy = (s) => String(s || "").replaceAll("_", " ").toLowerCase().replace(/^\w|\s\w/g, (c) => c.toUpperCase());
+
+    const STRATEGIES = {
+      BREAKOUT_LONG: {
+        side: "LONG", family: "Trend", regime: "BULLISH + LOW_VOL", twin: "Bull Call Spread / Long Call",
+        what: "Compra quando il prezzo rompe al rialzo il massimo degli ultimi 20 giorni (canale di Donchian) dentro un trend rialzista, dopo una fase di volatilità compressa.",
+        trigger: "Prezzo attuale sopra il massimo a 20 giorni, ma non oltre 0,75 ATR: un breakout già lontano dal livello non viene inseguito.",
+        wins: "Il breakout prosegue: la compressione della volatilità si scarica in un movimento direzionale nel verso del trend.",
+        loses: "Falso breakout: il prezzo rientra sotto il livello e scende fino allo stop (2 ATR sotto l'ingresso).",
+        risks: ["Falsi breakout frequenti nei mercati senza direzione", "Gap di apertura oltre lo stop (lo stop diventa un ordine al mercato)"],
+      },
+      PULLBACK_LONG: {
+        side: "LONG", family: "Trend", regime: "BULLISH + HIGH_VOL", twin: "Bull Put Spread",
+        what: "In un trend rialzista con volatilità alta non insegue il prezzo: aspetta un ritracciamento verso la media mobile a 20 giorni e compra la debolezza.",
+        trigger: "Prezzo entro 1 ATR dalla EMA20, sempre sopra la EMA50, con RSI(14) ≤ 50 (il momentum di breve si è scaricato).",
+        wins: "Il trend riprende dopo la correzione: si è comprato a sconto rispetto al massimo recente.",
+        loses: "Il ritracciamento diventa un'inversione: il prezzo rompe la struttura del trend e tocca lo stop (1,5 ATR).",
+        risks: ["In alta volatilità i ritracciamenti possono essere profondi", "Uscita anticipata se il regime diventa BEARISH"],
+      },
+      BREAKDOWN_SHORT: {
+        side: "SHORT", family: "Trend", regime: "BEARISH + LOW_VOL", twin: "Bear Put Spread / Long Put",
+        what: "Vende allo scoperto quando il prezzo rompe al ribasso il minimo degli ultimi 20 giorni dentro un trend ribassista.",
+        trigger: "Prezzo sotto il minimo a 20 giorni, ma non oltre 0,75 ATR.",
+        wins: "Il ribasso accelera dopo la rottura del supporto.",
+        loses: "Short squeeze o rimbalzo: il prezzo risale fino allo stop (2 ATR sopra l'ingresso).",
+        risks: ["Uno short ha perdita teorica illimitata (lo stop la limita, salvo gap)", "Costi di prestito titoli nei conti reali"],
+      },
+      RALLY_SHORT: {
+        side: "SHORT", family: "Trend", regime: "BEARISH + HIGH_VOL", twin: "Bear Call Spread",
+        what: "In un trend ribassista con volatilità alta aspetta un rimbalzo verso la EMA20 e vende la forza.",
+        trigger: "Prezzo entro 1 ATR dalla EMA20, sempre sotto la EMA50, con RSI(14) ≥ 50.",
+        wins: "Il rimbalzo si esaurisce e il trend ribassista riprende.",
+        loses: "Il rimbalzo diventa un'inversione rialzista: stop a 1,5 ATR sopra l'ingresso.",
+        risks: ["Rimbalzi violenti tipici dei mercati ribassisti", "Uscita anticipata se il regime diventa BULLISH"],
+      },
+      MEAN_REVERSION_LONG: {
+        side: "LONG", family: "Mean reversion", regime: "SIDEWAYS + HIGH_VOL", twin: "Iron Condor (lato put)",
+        what: "In un mercato laterale e volatile compra gli eccessi al ribasso, puntando al ritorno verso la media.",
+        trigger: "Prezzo sotto la banda di Bollinger inferiore (20 giorni, 2 deviazioni standard).",
+        wins: "Il prezzo torna verso la media mobile a 20 giorni (target).",
+        loses: "Il range si rompe e parte un trend ribassista: stop a 1,25 ATR.",
+        risks: ["Rapporto rischio/rendimento più basso dei trade di trend (alta probabilità, guadagno limitato)", "Time stop più corto: 10 giorni"],
+      },
+      MEAN_REVERSION_SHORT: {
+        side: "SHORT", family: "Mean reversion", regime: "SIDEWAYS + HIGH_VOL", twin: "Iron Condor (lato call)",
+        what: "In un mercato laterale e volatile vende allo scoperto gli eccessi al rialzo, puntando al ritorno verso la media.",
+        trigger: "Prezzo sopra la banda di Bollinger superiore.",
+        wins: "Il prezzo torna verso la media mobile a 20 giorni (target).",
+        loses: "Il range si rompe al rialzo: stop a 1,25 ATR.",
+        risks: ["Uno short ha perdita teorica illimitata (lo stop la limita, salvo gap)", "Time stop più corto: 10 giorni"],
+      },
+      NO_TRADE: {
+        side: "", family: "Nessun trade", regime: "SIDEWAYS + LOW_VOL", twin: "NO_TRADE",
+        what: "Mercato laterale e tranquillo: né trend da seguire né eccessi da sfruttare. Il bot resta fermo.",
+        trigger: "–", wins: "–", loses: "–", risks: [],
+      },
+    };
+    const CLOSE_REASON = {
+      TAKE_PROFIT: ["Take profit", "good"], STOP_LOSS: ["Stop loss", "bad"], TRAILING_STOP: ["Trailing stop", "good"],
+      TIME_STOP: ["Time stop", ""], TREND_REVERSAL: ["Inversione di trend", "warn"], MANUAL_CLOSE: ["Chiusura manuale", ""],
+      NOT_FOUND_IN_BROKER: ["Non trovato su Alpaca", "warn"],
+    };
+
+    function infoButton(strategy, tradeId) {
+      if (!strategy || !STRATEGIES[strategy]) return "";
+      return `<button type="button" class="info-btn" data-strategy="${esc(strategy)}"${tradeId ? ` data-trade="${esc(tradeId)}"` : ""} aria-label="Scheda didattica: ${esc(prettyStrategy(strategy))}">i</button>`;
+    }
+    const sidePill = (side) => side ? `<span class="side ${side === "SHORT" ? "short" : "long"}">${side}</span>` : "";
+
+    // ------------------------------------------------------------------ //
+    // Render: trade
+    // ------------------------------------------------------------------ //
+    const n = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+    const fmtPx = (v) => (v === null ? "–" : num2.format(v));
+    const latestEquity = () => Number(state.snapshots.at(-1)?.equity || state.snapshots.at(-1)?.initial_capital || 0);
+    function tradeR(t) {
+      const risk = n(t.risk_per_share), qty = n(t.qty);
+      if (t.status === "OPEN") return n(t.r_multiple);
+      if (!risk || !qty || n(t.pnl) === null) return null;
+      return n(t.pnl) / (risk * qty);
+    }
+
+    function renderTrades() {
+      const all = state.trades;
+      const open = all.filter((t) => t.status === "OPEN");
+      const closed = all.filter((t) => t.status === "CLOSED" && n(t.pnl) !== null);
+      const realized = closed.reduce((a, t) => a + Number(t.pnl || 0), 0);
+      const unreal = open.reduce((a, t) => a + Number(t.unrealized_pnl || 0), 0);
+      const wins = closed.filter((t) => Number(t.pnl) > 0).length;
+      const avgR = closed.length ? closed.reduce((a, t) => a + (tradeR(t) || 0), 0) / closed.length : null;
+      $("tradesSummary").innerHTML = all.length
+        ? `${open.length} aperte · non realizzato <span class="${cls(unreal)}">${fmtUsd(unreal)}</span> · ${closed.length} chiuse · ` +
+          `realizzato <span class="${cls(realized)}">${fmtUsd(realized)}</span>` +
+          (closed.length ? ` · win rate ${Math.round((wins / closed.length) * 100)}% · media ${signed(avgR, (x) => num2.format(x))}R` : "")
+        : "Nessun trade registrato.";
+
+      const rows = all.filter((t) => state.status === "ALL" || t.status === state.status);
+      if (!rows.length) {
+        $("tradesTable").innerHTML = `<tr><td colspan="10" class="muted text-center py-6">${all.length ? "Nessun trade con questo filtro." : "Il bot non ha ancora aperto posizioni."}</td></tr>`;
+        return;
+      }
+      const equity = latestEquity();
+      $("tradesTable").innerHTML = rows.map((t) => {
+        const isOpen = t.status === "OPEN";
+        const entry = n(t.entry_price), qty = n(t.qty), stop = n(t.stop_price), init = n(t.initial_stop), tp = n(t.take_profit);
+        const now = isOpen ? n(t.current_price) : n(t.exit_price);
+        const risk = n(t.risk_per_share) !== null ? n(t.risk_per_share) * qty : null;
+        const r = tradeR(t);
+        const pnl = isOpen ? n(t.unrealized_pnl) : n(t.pnl);
+        const pnlPct = isOpen ? (entry && qty && pnl !== null ? (pnl / (entry * qty)) * 100 : null) : n(t.pnl_pct);
+        const reason = CLOSE_REASON[t.close_reason] || [t.close_reason, ""];
+        const status = isOpen
+          ? '<span class="pill open"><span class="dot"></span>Aperta</span>'
+          : `<span class="pill ${reason[1]}">${esc(reason[0] || "Chiusa")}</span>`;
+        return `<tr>
+          <td class="num">${dtShortFmt.format(new Date(t.created_at))}${!isOpen && t.closed_at ? `<div class="muted text-xs">chiusa ${dtShortFmt.format(new Date(t.closed_at))}</div>` : ""}</td>
+          <td><div class="flex items-center gap-2"><span class="font-semibold">${esc(t.ticker)}</span>${sidePill(t.side)}</div></td>
+          <td><div class="flex items-center gap-1.5">${esc(prettyStrategy(t.strategy))}${infoButton(t.strategy, t.id)}</div><div class="mt-1">${status}</div></td>
+          <td class="r num">${qty ?? "–"}</td>
+          <td class="r num">${fmtPx(entry)}<div class="muted text-xs">${entry && qty ? usd0.format(entry * qty) : ""}</div></td>
+          <td class="r num"><span class="bad">${fmtPx(stop)}</span> / <span class="good">${fmtPx(tp)}</span>${init !== null && stop !== null && Math.abs(init - stop) > 0.005 ? `<div class="muted text-xs">stop iniziale ${fmtPx(init)}</div>` : ""}</td>
+          <td class="r num">${fmtPx(now)}<div class="muted text-xs">${isOpen ? "attuale" : "uscita"}</div></td>
+          <td class="r num">${risk !== null ? usd.format(risk) : "–"}<div class="muted text-xs">${risk !== null && equity ? num2.format((risk / equity) * 100) + "% del capitale" : ""}</div></td>
+          <td class="r num ${r !== null ? cls(r) : ""}">${r !== null ? signed(r, (x) => num2.format(x)) + "R" : "–"}</td>
+          <td class="r num"><span class="${cls(pnl || 0)}">${pnl !== null ? fmtUsd(pnl) : "–"}</span><div class="muted text-xs">${pnlPct !== null ? fmtPct(pnlPct) : ""}${isOpen ? " non realizzato" : ""}</div></td>
+        </tr>`;
+      }).join("");
+    }
+
+    // ------------------------------------------------------------------ //
+    // Matrice e scheda didattica
+    // ------------------------------------------------------------------ //
+    function renderMatrix() {
+      const cell = (s, sub) => {
+        const info = STRATEGIES[s];
+        if (s === "NO_TRADE") return `<div class="cell none"><div class="flex items-center gap-1.5">No trade${infoButton(s)}</div><div class="sub">nessun edge: il bot resta fermo</div></div>`;
+        return `<div class="cell"><div class="flex items-center gap-1.5">${sidePill(info.side)} <span class="font-medium">${esc(prettyStrategy(s))}</span>${infoButton(s)}</div><div class="sub">${esc(sub)} · gemella in opzioni: ${esc(info.twin)}</div></div>`;
+      };
+      $("matrix").innerHTML = `
+        <div></div><div class="h">HIGH_VOL · "compra la debolezza / vendi la forza"</div><div class="h">LOW_VOL · "compra il movimento"</div>
+        <div class="h">▲ BULLISH</div>${cell("PULLBACK_LONG", "ritracciamento sulla EMA20")}${cell("BREAKOUT_LONG", "rottura del massimo a 20 giorni")}
+        <div class="h">▼ BEARISH</div>${cell("RALLY_SHORT", "rimbalzo sulla EMA20")}${cell("BREAKDOWN_SHORT", "rottura del minimo a 20 giorni")}
+        <div class="h">◆ SIDEWAYS</div>
+        <div class="cell"><div class="flex items-center gap-1.5"><span class="font-medium">Mean Reversion</span>${infoButton("MEAN_REVERSION_LONG")}</div>
+          <div class="sub">${sidePill("LONG")} sotto la banda inferiore · ${sidePill("SHORT")} sopra la superiore · target la media · gemella: Iron Condor</div></div>
+        ${cell("NO_TRADE")}`;
+    }
+
+    // Livelli del trade su una scala di prezzo: stop, ingresso, attuale/uscita, target
+    function levelsSvg(t) {
+      const entry = n(t.entry_price), stop = n(t.stop_price), tp = n(t.take_profit), init = n(t.initial_stop);
+      const cur = t.status === "OPEN" ? n(t.current_price) : n(t.exit_price);
+      if (entry === null || stop === null || tp === null) return "";
+      const good = cssVar("--good"), bad = cssVar("--bad"), text2 = cssVar("--text-2"), muted = cssVar("--muted"), series = cssVar("--series");
+      const pts = [{ k: "Stop", v: stop, c: bad }, { k: "Ingresso", v: entry, c: text2 }, { k: "Target", v: tp, c: good }];
+      if (init !== null && Math.abs(init - stop) > 0.005) pts.push({ k: "Stop iniziale", v: init, c: muted });
+      if (cur !== null) pts.push({ k: t.status === "OPEN" ? "Attuale" : "Uscita", v: cur, c: series });
+      const vals = pts.map((p) => p.v), lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.06 || 1;
+      const W = 680, H = 120, x0 = 20, x1 = W - 20, y = 62;
+      const x = (v) => x0 + ((v - (lo - pad)) / (hi - lo + 2 * pad)) * (x1 - x0);
+      const seg = (a, b, c) => `<line x1="${x(a)}" y1="${y}" x2="${x(b)}" y2="${y}" stroke="${c}" stroke-width="6" stroke-linecap="round" opacity=".55"/>`;
+      const sorted = pts.slice().sort((a, b) => a.v - b.v);
+      const marks = sorted.map((p, i) => {
+        const up = i % 2 === 0, ty = up ? y - 18 : y + 30;
+        return `<circle cx="${x(p.v)}" cy="${y}" r="5" fill="${p.c}" stroke="${cssVar("--surface")}" stroke-width="2"/>
+          <text x="${x(p.v)}" y="${ty}" text-anchor="middle" font-size="11" fill="${p.c}">${esc(p.k)}</text>
+          <text x="${x(p.v)}" y="${ty + 13}" text-anchor="middle" font-size="11" fill="${muted}">${num2.format(p.v)}</text>`;
+      }).join("");
+      return `<svg class="levels" viewBox="0 0 ${W} ${H}" role="img" aria-label="Livelli di prezzo del trade">
+        <line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${cssVar("--grid")}" stroke-width="2"/>
+        ${seg(stop, entry, bad)}${seg(entry, tp, good)}${marks}</svg>`;
+    }
+
+    function exitRulesHtml(t) {
+      const rules = t?.details_json?.exit_rules || {};
+      const be = rules.breakeven_at_r ?? 1, trailStart = rules.trail_start_r ?? 1.5, trailAtr = rules.trail_atr_mult ?? 2.5;
+      const items = [];
+      if (t) {
+        const isLong = t.side !== "SHORT", entry = n(t.entry_price), risk = n(t.risk_per_share), atr = n(t.details_json?.atr);
+        const dir = isLong ? 1 : -1, maxDays = n(t.details_json?.max_holding_days);
+        items.push(`<div class="rule"><strong>Stop loss</strong> (ordine stop lato broker, GTC): ${fmtPx(n(t.stop_price))}${n(t.initial_stop) !== null && Math.abs(n(t.initial_stop) - n(t.stop_price)) > 0.005 ? ` · iniziale ${fmtPx(n(t.initial_stop))}` : ""}</div>`);
+        items.push(`<div class="rule"><strong>Take profit</strong> (ordine limit lato broker, nello stesso OCO): ${fmtPx(n(t.take_profit))}</div>`);
+        if (entry && risk && be > 0) items.push(`<div class="rule"><strong>Breakeven</strong>: a ${num2.format(entry + dir * be * risk)} (+${be}R) lo stop sale al prezzo di ingresso ${fmtPx(entry)}.</div>`);
+        if (entry && risk && atr && trailStart > 0 && STRATEGIES[t.strategy]?.family === "Trend")
+          items.push(`<div class="rule"><strong>Trailing stop</strong>: da ${num2.format(entry + dir * trailStart * risk)} (+${trailStart}R) lo stop segue il prezzo a ${trailAtr} ATR (${num2.format(trailAtr * atr)} $).</div>`);
+        if (maxDays) items.push(`<div class="rule"><strong>Time stop</strong>: chiusura dopo ${maxDays} giorni, il ${dFmt.format(new Date(new Date(t.created_at).getTime() + maxDays * 86_400_000))}.</div>`);
+        if (rules.exit_on_trend_reversal !== false) items.push(`<div class="rule"><strong>Inversione di trend</strong>: chiusura se il regime diventa ${isLong ? "BEARISH" : "BULLISH"}.</div>`);
+      } else {
+        items.push(`<div class="rule"><strong>Stop e target</strong> lato broker (ordine OCO), quindi attivi anche a bot spento. Target: 3R per i trade di trend, la media mobile per la mean reversion.</div>`);
+        items.push(`<div class="rule"><strong>Breakeven</strong> a +${be}R; <strong>trailing</strong> da +${trailStart}R a ${trailAtr} ATR (solo trend); <strong>time stop</strong>; <strong>inversione di trend</strong>.</div>`);
+      }
+      return items.join("");
+    }
+
+    function openStrategyInfo(strategy, trade) {
+      const info = STRATEGIES[strategy];
+      if (!info) return;
+      $("stratTitle").innerHTML = `${esc(prettyStrategy(strategy))}${trade ? ` <span class="muted">· ${esc(trade.ticker)}</span>` : ""}`;
+      $("stratTags").innerHTML = [info.family, info.regime, info.side, `gemella in opzioni: ${info.twin}`].filter(Boolean)
+        .map((x) => `<span class="tag">${esc(x)}</span>`).join("");
+      const why = trade?.details_json
+        ? `<h3>Perché il bot l'ha scelta</h3><p>Regime ${esc(trade.details_json.rationale || "")}. Segnale: ${esc(trade.details_json.signal || "–")}.
+           Rapporto rischio/rendimento al segnale ${trade.details_json.reward_risk ? num2.format(trade.details_json.reward_risk) + "R" : "–"}.</p>`
+        : "";
+      $("stratBody").innerHTML = `
+        <h3>Cos'è</h3><p>${esc(info.what)}</p>
+        <h3>Quando entra</h3><p>${esc(info.trigger)}</p>
+        ${why}
+        ${trade ? `<h3>Livelli del trade</h3>${levelsSvg(trade)}` : ""}
+        <h3>Quando guadagna</h3><p>${esc(info.wins)}</p>
+        <h3>Quando perde</h3><p>${esc(info.loses)}</p>
+        ${strategy !== "NO_TRADE" ? `<h3>Come esce</h3>${exitRulesHtml(trade)}` : ""}
+        ${info.risks.length ? `<h3>Rischi</h3><ul>${info.risks.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}`;
+      $("stratDialog").showModal();
+    }
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest(".info-btn");
+      if (!btn) return;
+      const trade = btn.dataset.trade ? state.trades.find((t) => String(t.id) === btn.dataset.trade) : null;
+      openStrategyInfo(btn.dataset.strategy, trade);
+    });
+    $("stratClose").addEventListener("click", () => $("stratDialog").close());
+    $("stratDialog").addEventListener("click", (e) => { if (e.target === $("stratDialog")) $("stratDialog").close(); });
+
+    // ------------------------------------------------------------------ //
+    // Render: screening
+    // ------------------------------------------------------------------ //
+    const trendIcon = { BULLISH: "▲", BEARISH: "▼", SIDEWAYS: "◆" };
+
+    function renderScreening() {
+      const rows = state.screening;
+      if (!rows.length) {
+        $("screenSubtitle").textContent = "Nessuno screening registrato.";
+        $("screenTable").innerHTML = `<tr><td colspan="11" class="muted text-center py-6">In attesa del primo ciclo di trading del bot.</td></tr>`;
+        return;
+      }
+      const when = new Date(rows[0].timestamp);
+      const selected = rows.filter((r) => r.selected).map((r) => r.ticker);
+      $("screenSubtitle").innerHTML = `Ciclo del ${dtFmt.format(when)} (${timeAgo(when)}) · ${rows.length} ticker · ` +
+        (selected.length ? `selezionati: <strong>${esc(selected.join(", "))}</strong>` : "nessun ticker selezionato: il bot è rimasto fermo");
+      $("screenTable").innerHTML = rows.map((r) => {
+        const score = Number(r.opportunity_score || 0);
+        const dash = '<span class="muted">–</span>';
+        return `<tr>
+          <td class="font-semibold">${esc(r.ticker)}</td>
+          <td class="r num">${r.price !== null ? num2.format(r.price) : "–"}</td>
+          <td>${r.trend ? `<span class="t2">${trendIcon[r.trend] || ""}</span> ${esc(r.trend)}` : dash}</td>
+          <td>${r.volatility_regime ? esc(r.volatility_regime.replace("_", " ")) : dash}</td>
+          <td class="r num">${r.vol_rank !== null ? Math.round(r.vol_rank) : "–"}</td>
+          <td class="r num">${r.adx !== null ? num2.format(r.adx) : "–"}</td>
+          <td class="r num">${r.rsi !== null ? Math.round(r.rsi) : "–"}</td>
+          <td class="r num">${r.atr_pct !== null ? num2.format(r.atr_pct * 100) + "%" : "–"}</td>
+          <td class="num"><span class="scorebar" aria-hidden="true"><span style="width:${Math.min(100, Math.max(0, score))}%"></span></span> ${num2.format(score)}</td>
+          <td>${r.selected ? '<span class="pill sel">✓ Sì</span>' : '<span class="muted">No</span>'}</td>
+          <td class="t2" style="white-space: normal; min-width: 280px;"><div class="flex items-center gap-1.5">${esc(prettyStrategy(r.strategy) || "–")}${infoButton(r.strategy)}</div>
+            ${r.signal ? `<div class="text-xs">${esc(r.signal)}</div>` : ""}<div class="muted text-xs">${esc(r.reason || "")}</div></td>
+        </tr>`;
+      }).join("");
+    }
+
+    // ------------------------------------------------------------------ //
+    // Orari del mercato USA (calendario NYSE) e cadenza del bot
+    // ------------------------------------------------------------------ //
+    const NY_TZ = "America/New_York";
+    const nyPartsFmt = new Intl.DateTimeFormat("en-US", { timeZone: NY_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+                                                         hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+    const nyTimeFmt = new Intl.DateTimeFormat("it-IT", { timeZone: NY_TZ, hour: "2-digit", minute: "2-digit" });
+    const dayFmt = new Intl.DateTimeFormat("it-IT", { weekday: "short", day: "numeric", month: "short" });
+    const dayTimeFmt = new Intl.DateTimeFormat("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+    function nyParts(date) {
+      const p = {};
+      for (const { type, value } of nyPartsFmt.formatToParts(date)) p[type] = Number(value);
+      return { y: p.year, m: p.month, d: p.day, hh: p.hour % 24, mm: p.minute };
+    }
+    // Ora "da parete" di New York -> istante assoluto (l'ora legale USA è gestita dal browser)
+    function nyTime(y, m, d, hh, mm) {
+      const target = Date.UTC(y, m - 1, d, hh, mm);
+      let t = target + 5 * 3_600_000;
+      for (let i = 0; i < 3; i++) {
+        const p = nyParts(new Date(t));
+        const diff = target - Date.UTC(p.y, p.m - 1, p.d, p.hh, p.mm);
+        if (!diff) break;
+        t += diff;
+      }
+      return new Date(t);
+    }
+    // Date di calendario pure (senza fuso), calcolate in UTC
+    const dkey = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const weekday = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const addDays = (y, m, d, n) => { const t = new Date(Date.UTC(y, m - 1, d + n)); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() }; };
+    function nthWeekday(y, m, wd, n) {  // n-esimo giorno `wd` del mese (n = -1: l'ultimo)
+      if (n > 0) return 1 + ((wd - weekday(y, m, 1) + 7) % 7) + (n - 1) * 7;
+      const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      return last - ((weekday(y, m, last) - wd + 7) % 7);
+    }
+    function easter(y) {  // computus gregoriano
+      const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+      const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+      const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, mm = Math.floor((a + 11 * h + 22 * l) / 451);
+      return { m: Math.floor((h + l - 7 * mm + 114) / 31), d: ((h + l - 7 * mm + 114) % 31) + 1 };
+    }
+    // Festività NYSE e chiusure anticipate (13:00 New York), calcolate con le regole ufficiali
+    const calCache = new Map();
+    function nyseCalendar(y) {
+      if (calCache.has(y)) return calCache.get(y);
+      const holidays = new Map(), early = new Map();
+      const add = (m, d, name) => holidays.set(dkey(y, m, d), name);
+      const observed = (m, d, name, satToFriday = true) => {  // sabato -> venerdì prima, domenica -> lunedì dopo
+        const wd = weekday(y, m, d);
+        const shift = wd === 6 ? (satToFriday ? -1 : null) : wd === 0 ? 1 : 0;
+        if (shift === null) return;
+        const o = addDays(y, m, d, shift);
+        holidays.set(dkey(o.y, o.m, o.d), name);
+      };
+      observed(1, 1, "Capodanno", false);  // se cade di sabato la NYSE non lo recupera
+      add(1, nthWeekday(y, 1, 1, 3), "Martin Luther King Day");
+      add(2, nthWeekday(y, 2, 1, 3), "Presidents' Day");
+      const ea = easter(y), gf = addDays(y, ea.m, ea.d, -2);
+      add(gf.m, gf.d, "Venerdì Santo");
+      add(5, nthWeekday(y, 5, 1, -1), "Memorial Day");
+      observed(6, 19, "Juneteenth");
+      observed(7, 4, "Independence Day");
+      add(9, nthWeekday(y, 9, 1, 1), "Labor Day");
+      const tg = nthWeekday(y, 11, 4, 4);
+      add(11, tg, "Thanksgiving");
+      observed(12, 25, "Natale");
+      const wdJul3 = weekday(y, 7, 3), wdDec24 = weekday(y, 12, 24);
+      if (wdJul3 >= 1 && wdJul3 <= 4) early.set(dkey(y, 7, 3), "vigilia dell'Independence Day");
+      early.set(dkey(y, 11, tg + 1), "giorno dopo Thanksgiving");
+      if (wdDec24 >= 1 && wdDec24 <= 4) early.set(dkey(y, 12, 24), "vigilia di Natale");
+      const cal = { holidays, early };
+      calCache.set(y, cal);
+      return cal;
+    }
+    function sessionOn(y, m, d) {
+      const wd = weekday(y, m, d), key = dkey(y, m, d), cal = nyseCalendar(y);
+      if (wd === 0 || wd === 6) return { closed: true, reason: "weekend" };
+      if (cal.holidays.has(key)) return { closed: true, reason: cal.holidays.get(key) };
+      const early = cal.early.get(key) || null;
+      return { closed: false, early, open: nyTime(y, m, d, 9, 30), close: nyTime(y, m, d, early ? 13 : 16, 0) };
+    }
+    function calendarState(now) {
+      const p = nyParts(now), today = sessionOn(p.y, p.m, p.d);
+      if (!today.closed && now >= today.open && now < today.close) return { isOpen: true, open: today.open, close: today.close, today };
+      for (let i = !today.closed && now < today.open ? 0 : 1; i < 15; i++) {
+        const day = addDays(p.y, p.m, p.d, i), s = sessionOn(day.y, day.m, day.d);
+        if (!s.closed) return { isOpen: false, nextOpen: s.open, nextClose: s.close, today };
+      }
+      return { isOpen: false, today };
+    }
+    // Se il bot ha pubblicato il clock di Alpaca (fonte ufficiale) ed è ancora valido, ha la precedenza
+    function marketState(now) {
+      const cal = { ...calendarState(now), source: "calendar" };
+      const b = state.botStatus;
+      if (!b?.market_next_open || !b?.market_next_close) return cal;
+      const o = new Date(b.market_next_open), c = new Date(b.market_next_close);
+      if (!(now < c)) return cal;
+      if (c < o) return { ...cal, isOpen: true, open: cal.open || cal.today.open, close: c, source: "alpaca" };
+      if (now < o) return { ...cal, isOpen: false, nextOpen: o, nextClose: c, source: "alpaca" };
+      return { ...cal, isOpen: true, open: o, close: c, source: "alpaca" };
+    }
+    function upcomingClosures(now, days = 30, max = 2) {
+      const p = nyParts(now), out = [];
+      for (let i = 0; i <= days && out.length < max; i++) {
+        const day = addDays(p.y, p.m, p.d, i), wd = weekday(day.y, day.m, day.d);
+        if (wd === 0 || wd === 6) continue;
+        const cal = nyseCalendar(day.y), key = dkey(day.y, day.m, day.d);
+        const date = new Date(Date.UTC(day.y, day.m - 1, day.d, 12));
+        if (cal.holidays.has(key)) out.push(`${dayFmt.format(date)}: chiuso (${esc(cal.holidays.get(key))})`);
+        else if (cal.early.has(key)) out.push(`${dayFmt.format(date)}: chiude alle ${tFmt.format(nyTime(day.y, day.m, day.d, 13, 0))} (${esc(cal.early.get(key))})`);
+      }
+      return out;
+    }
+    // Prossimo controllo dello scheduler Supabase (cron in UTC) a partire da `from`
+    function nextSchedulerTick(from) {
+      const step = SCHED.everyMin * 60_000;
+      let t = new Date(Math.ceil(from.getTime() / step) * step);
+      for (let i = 0; i < 20; i++) {
+        const wd = t.getUTCDay(), h = t.getUTCHours();
+        const weekdayOk = wd >= 1 && wd <= 5;
+        if (weekdayOk && h >= SCHED.fromHourUtc && h <= SCHED.toHourUtc) return t;
+        const sameDay = weekdayOk && h < SCHED.fromHourUtc;
+        t = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + (sameDay ? 0 : 1), SCHED.fromHourUtc));
+      }
+      return null;
+    }
+    const utcToday = (h, m) => { const n = new Date(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), h, m)); };
+
+    const pctWidth = (part, whole) => `${whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0}%`;
+    function fmtCountdown(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      const hms = [h, m, sec].map((v) => String(v).padStart(2, "0")).join(":");
+      return d ? `${d}g ${hms}` : hms;
+    }
+    function fmtDur(ms) {
+      const min = Math.max(0, Math.round(ms / 60_000));
+      if (min < 1) return "meno di 1 min";
+      const h = Math.floor(min / 60), m = min % 60;
+      return h ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`;
+    }
+    function setPill(id, kind, text) {
+      const el = $(id);
+      el.className = `pill ${kind}`;
+      el.innerHTML = `<span class="dot"></span>${esc(text)}`;
+    }
+    const kvHtml = (rows) => rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+
+    function renderMarket(now) {
+      const ms = marketState(now), t = ms.today;
+      if (ms.isOpen) {
+        setPill("mktPill", "good", t.early ? "Aperto · chiusura anticipata" : "Aperto");
+        $("mktCountLabel").textContent = `Chiude tra (alle ${tFmt.format(ms.close)})`;
+        $("mktCount").textContent = fmtCountdown(ms.close - now);
+        const start = ms.open || t.open;
+        $("mktBar").style.width = start ? pctWidth(now - start, ms.close - start) : "0%";
+      } else {
+        setPill("mktPill", "", "Chiuso");
+        $("mktCountLabel").textContent = ms.nextOpen ? `Apre tra (${dayTimeFmt.format(ms.nextOpen)})` : "Prossima apertura non disponibile";
+        $("mktCount").textContent = ms.nextOpen ? fmtCountdown(ms.nextOpen - now) : "–";
+        $("mktBar").style.width = "0%";
+      }
+      const rows = [[
+        "Oggi",
+        t.closed
+          ? (t.reason === "weekend" ? "chiuso (weekend)" : `chiuso: ${esc(t.reason)}`)
+          : `${tFmt.format(t.open)} – ${tFmt.format(t.close)} <span class="muted">(${nyTimeFmt.format(t.open)} – ${nyTimeFmt.format(t.close)} New York)</span>` +
+            (t.early ? `<br><span style="color:var(--warn)">chiusura anticipata: ${esc(t.early)}</span>` : ""),
+      ]];
+      if (!ms.isOpen && ms.nextOpen) rows.push(["Prossima sessione", `${dayFmt.format(ms.nextOpen)}, ${tFmt.format(ms.nextOpen)} – ${tFmt.format(ms.nextClose)}`]);
+      const closures = upcomingClosures(now);
+      if (closures.length) rows.push(["Festività", closures.join("<br>")]);
+      $("mktInfo").innerHTML = kvHtml(rows);
+      $("mktSource").textContent = (ms.source === "alpaca"
+        ? `Orari ufficiali dal clock di Alpaca (letto dal bot ${timeAgo(new Date(state.botStatus.clock_at || state.botStatus.updated_at))}).`
+        : "Orari dal calendario NYSE (festività e chiusure anticipate incluse).") + " Ore nel fuso del tuo browser.";
+    }
+
+    const TRIGGER_LABEL = { "supabase-scheduler": "scheduler Supabase", "github-cron": "cron GitHub", manual: "avvio manuale", local: "locale" };
+
+    function renderBot(now) {
+      const b = state.botStatus;
+      if (!configured) { setPill("botPill", "", "Non configurato"); return; }
+      const refreshSec = b?.refresh_interval_sec || BOT_DEFAULTS.refreshSec;
+      const tradeMin = b?.trade_interval_min || BOT_DEFAULTS.tradeMin;
+      const maxMin = b?.session_max_minutes || BOT_DEFAULTS.sessionMaxMin;
+      const updated = b ? new Date(b.updated_at) : null;
+      const lastSnap = state.snapshots.at(-1)?.t || null;
+      const lastSignal = new Date(Math.max(updated?.getTime() || 0, lastSnap?.getTime() || 0, state.lastRun?.t?.getTime() || 0));
+      const staleMs = Math.max(3 * refreshSec * 1000, 5 * 60_000);
+      const alive = now - lastSignal < staleMs;
+      const active = b ? alive && ["RUNNING", "WAITING_OPEN"].includes(b.state) : !!lastSnap && now - lastSnap < staleMs;
+      const ms = marketState(now);
+      const rows = [];
+      let label = "", count = "–", bar = "0%";
+
+      if (active && b?.state === "WAITING_OPEN") {
+        setPill("botPill", "warn", "In attesa dell'apertura");
+        label = "Il bot è partito e attende l'apertura del mercato tra";
+        count = ms.nextOpen ? fmtCountdown(ms.nextOpen - now) : "–";
+      } else if (active) {
+        setPill("botPill", "good", "In sessione");
+        let next = b?.next_trade_cycle_at ? new Date(b.next_trade_cycle_at) : null;
+        if (!next && state.screening[0]) next = new Date(new Date(state.screening[0].timestamp).getTime() + tradeMin * 60_000);
+        if (next) {
+          const left = next - now, period = tradeMin * 60_000;
+          label = `Prossimo ciclo di trading (alle ${tFmt.format(next)}) tra`;
+          count = left > 0 ? fmtCountdown(left) : "in corso…";
+          bar = pctWidth(period - left, period);
+        } else {
+          label = "Primo ciclo di trading in corso";
+        }
+        const deadline = b?.session_deadline ? new Date(b.session_deadline) : null;
+        const close = ms.isOpen ? ms.close : null;
+        const end = deadline && close ? (deadline < close ? deadline : close) : deadline || close;
+        if (end) {
+          const byDeadline = deadline && end === deadline && (!close || deadline < close);
+          rows.push(["Fine sessione", `tra ${fmtDur(end - now)} (alle ${tFmt.format(end)}) · ` +
+            (byDeadline ? `limite di ${maxMin} min del job, poi lo scheduler la riavvia entro ~${SCHED.idleMin + SCHED.everyMin} min` : "chiusura del mercato")]);
+        }
+        if (b?.session_started_at) {
+          rows.push(["Sessione iniziata", `${tFmt.format(new Date(b.session_started_at))} · ${b.trading_cycles ?? 0} cicli di trading finora`]);
+        }
+      } else {
+        const crashed = b?.state === "RUNNING" && ms.isOpen;
+        setPill("botPill", crashed ? "bad" : "", crashed ? "Nessun segnale" : "Fermo");
+        if (ms.isOpen) {
+          // Lo scheduler riavvia il bot al primo controllo dopo `idleMin` minuti senza segnali
+          const earliest = new Date(Math.max(now.getTime(), lastSignal.getTime() + SCHED.idleMin * 60_000));
+          const restart = nextSchedulerTick(earliest);
+          label = restart ? `Mercato aperto: lo scheduler lo riavvia alle ${tFmt.format(restart)}, tra` : "Mercato aperto, scheduler fuori orario";
+          count = restart ? fmtCountdown(restart - now) : "–";
+        } else {
+          label = ms.nextOpen ? "Mercato chiuso: la prossima sessione parte all'apertura, tra" : "Mercato chiuso";
+          count = ms.nextOpen ? fmtCountdown(ms.nextOpen - now) : "–";
+        }
+        if (b?.message) rows.push(["Ultimo stop", `${updated ? tFmt.format(updated) + " · " : ""}${esc(b.message)}`]);
+      }
+
+      const tick = nextSchedulerTick(now);
+      rows.push(["Scheduler", `ogni ${SCHED.everyMin} min, lun–ven ${tFmt.format(utcToday(SCHED.fromHourUtc, 0))}–${tFmt.format(utcToday(SCHED.toHourUtc, 55))}: ` +
+        `avvia il bot se è fermo da più di ${SCHED.idleMin} min` +
+        (tick ? `<br><span class="muted">prossimo controllo ${tick - now < 86_400_000 ? `tra ${fmtCountdown(tick - now)}` : dayTimeFmt.format(tick)}</span>` : "")]);
+      rows.push(["Durante la sessione", `posizioni e TP/SL ogni ${refreshSec} s · screening e nuovi trade ogni ${tradeMin} min · durata max ${maxMin} min` +
+        (b ? "" : ` <span class="muted">(valori di default)</span>`)]);
+
+      $("botCountLabel").textContent = label;
+      $("botCount").textContent = count;
+      $("botBar").style.width = bar;
+      $("botInfo").innerHTML = kvHtml(rows);
+      $("botSource").textContent = b
+        ? `Stato pubblicato dal bot ${timeAgo(updated)}${b.run_id ? ` · run ${b.run_id}` : ""}${b.trigger ? ` · avviato da ${TRIGGER_LABEL[b.trigger] || b.trigger}` : ""}${b.dry_run ? " · DRY_RUN" : ""}.`
+        : state.botStatusMissing
+          ? "Tabella stock_bot_status non trovata: riesegui supabase/schema.sql per avere i contatori esatti (ora sono stime)."
+          : "Il bot non ha ancora pubblicato il suo stato: i contatori diventano esatti dal prossimo run.";
+    }
+
+    function renderClocks() {
+      const now = new Date();
+      try { renderMarket(now); } catch (err) { console.error("renderMarket", err); }
+      try { renderBot(now); } catch (err) { console.error("renderBot", err); }
+    }
+
+    function renderAll() { renderKpis(); renderClocks(); renderChart(); renderTrades(); renderScreening(); }
+
+    // ------------------------------------------------------------------ //
+    // Controlli
+    // ------------------------------------------------------------------ //
+    function bindSeg(id, attr, onPick) {
+      const group = $(id);
+      group.addEventListener("click", (e) => {
+        const btn = e.target.closest("button"); if (!btn) return;
+        group.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+        onPick(btn.dataset[attr]);
+      });
+    }
+    bindSeg("unitSeg", "unit", (v) => { state.unit = v; renderChart(); });
+    bindSeg("rangeSeg", "range", (v) => { state.rangeDays = Number(v); renderChart(); });
+    bindSeg("statusSeg", "status", (v) => { state.status = v; renderTrades(); });
+    $("refreshBtn").addEventListener("click", () => configured && loadAll());
+
+    function currentTheme() {
+      const forced = document.documentElement.dataset.theme;
+      if (forced) return forced;
+      return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      try { localStorage.setItem("theme", theme); } catch (_) {}
+      if (chart) renderChart();
+    }
+    try { const saved = localStorage.getItem("theme"); if (saved) document.documentElement.dataset.theme = saved; } catch (_) {}
+    $("themeBtn").addEventListener("click", () => applyTheme(currentTheme() === "dark" ? "light" : "dark"));
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => chart && renderChart());
+
+    // ------------------------------------------------------------------ //
+    // Avvio + realtime
+    // ------------------------------------------------------------------ //
+    function setLive(on, label) {
+      $("liveDot").classList.toggle("on", on);
+      $("liveLabel").textContent = label;
+    }
+
+    renderMatrix();
+    renderClocks();
+    setInterval(renderClocks, 1000);  // contatori al secondo (nessuna chiamata al database)
+
+    if (!configured) {
+      $("configMsg").innerHTML = problem;
+      $("configBanner").classList.remove("hidden");
+      setLive(false, "Non configurato");
+    } else {
+      db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      loadAll();
+      setInterval(loadAll, REFRESH_MS);
+      setInterval(() => state.snapshots.length && renderKpis(), 30_000);
+
+      // Aggiornamenti in tempo reale (richiede la publication supabase_realtime, vedi schema.sql).
+      let pending = null;
+      const scheduleReload = () => { clearTimeout(pending); pending = setTimeout(loadAll, 1500); };
+      db.channel("stock-bot-updates")
+        .on("postgres_changes", { event: "*", schema: "public", table: "stock_equity_snapshots" }, scheduleReload)
+        .on("postgres_changes", { event: "*", schema: "public", table: "stock_trades" }, scheduleReload)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "stock_screening_logs" }, scheduleReload)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "stock_bot_runs" }, scheduleReload)
+        .on("postgres_changes", { event: "*", schema: "public", table: "stock_bot_status" }, (payload) => {
+          if (payload.new && payload.new.id === 1) { state.botStatus = payload.new; renderClocks(); }
+        })
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") setLive(true, "Live");
+          else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setLive(false, `Aggiornamento ogni ${REFRESH_MS / 1000}s`);
+        });
+    }
+  </script>
+</body>
+</html>

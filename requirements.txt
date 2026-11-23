@@ -1,0 +1,9 @@
+alpaca-py>=0.45.0,<1.0
+supabase>=2.10,<3.0
+pandas>=2.2
+numpy>=1.26
+python-dotenv>=1.0
+pydantic>=2.7,<3.0
+pydantic-settings>=2.7,<3.0
+loguru>=0.7
+pytest>=8.0

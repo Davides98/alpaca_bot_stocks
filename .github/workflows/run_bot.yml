@@ -1,0 +1,98 @@
+name: Run Stock Bot
+
+on:
+  # AVVIO PRINCIPALE: lo scheduler su Supabase (supabase/scheduler.sql) controlla ogni 5 minuti se il bot
+  # è attivo e, se non lo è, avvia questo workflow via API (workflow_dispatch con scheduler=true).
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "DRY_RUN: esegue la pipeline senza inviare ordini"
+        type: boolean
+        default: false
+      ignore_market_hours:
+        description: "Solo con DRY_RUN: esegui anche a mercato chiuso"
+        type: boolean
+        default: false
+      session:
+        description: "Sessione continua fino alla chiusura del mercato (altrimenti un solo ciclo)"
+        type: boolean
+        default: false
+      scheduler:
+        description: "Uso interno: avviato dallo scheduler Supabase (trattato come un run schedulato)"
+        type: boolean
+        default: false
+  schedule:
+    # RISERVA: cron orario di GitHub, nel caso lo scheduler Supabase non sia configurato.
+    # Minuto :23 (diverso dal bot opzioni) per non far partire i due bot nello stesso istante.
+    - cron: "23 13-20 * * 1-5"
+
+# Un solo run alla volta: evita ordini duplicati.
+concurrency:
+  group: stock-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # massimo consentito da GitHub; la sessione si chiude da sola prima (SESSION_MAX_MINUTES)
+    env:
+      IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.scheduler) != 'true' }}
+    steps:
+      # Actions fissate allo SHA completo del commit (come nel bot opzioni)
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m pytest -q
+
+      - name: Run bot
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BOT_TRIGGER: ${{ env.IS_MANUAL == 'true' && 'manual' || (github.event_name == 'schedule' && 'github-cron' || 'supabase-scheduler') }}
+          # Run manuale -> spunte del form; run automatici -> variabile di repository DRY_RUN (default "false" = ordini paper)
+          DRY_RUN: ${{ env.IS_MANUAL == 'true' && format('{0}', inputs.dry_run) || vars.DRY_RUN || 'false' }}
+          IGNORE_MARKET_HOURS: ${{ env.IS_MANUAL == 'true' && format('{0}', inputs.ignore_market_hours) || 'false' }}
+          SESSION_MODE: ${{ env.IS_MANUAL == 'true' && format('{0}', inputs.session) || 'true' }}
+          LOG_LEVEL: INFO
+          # Parametri: Secret se presente, altrimenti Variable, altrimenti default del codice (config/settings.py).
+          REFRESH_INTERVAL_SEC: ${{ secrets.REFRESH_INTERVAL_SEC || vars.REFRESH_INTERVAL_SEC }}
+          TRADE_INTERVAL_MIN: ${{ secrets.TRADE_INTERVAL_MIN || vars.TRADE_INTERVAL_MIN }}
+          WATCHLIST: ${{ secrets.WATCHLIST || vars.WATCHLIST }}
+          MAX_NEW_TRADES_PER_RUN: ${{ secrets.MAX_NEW_TRADES_PER_RUN || vars.MAX_NEW_TRADES_PER_RUN }}
+          MAX_OPEN_POSITIONS: ${{ secrets.MAX_OPEN_POSITIONS || vars.MAX_OPEN_POSITIONS }}
+          MAX_RISK_PER_TRADE_PCT: ${{ secrets.MAX_RISK_PER_TRADE_PCT || vars.MAX_RISK_PER_TRADE_PCT }}
+          MAX_POSITION_PCT: ${{ secrets.MAX_POSITION_PCT || vars.MAX_POSITION_PCT }}
+          MAX_GROSS_EXPOSURE_PCT: ${{ secrets.MAX_GROSS_EXPOSURE_PCT || vars.MAX_GROSS_EXPOSURE_PCT }}
+          MIN_OPPORTUNITY_SCORE: ${{ secrets.MIN_OPPORTUNITY_SCORE || vars.MIN_OPPORTUNITY_SCORE }}
+          ALLOW_SHORT: ${{ secrets.ALLOW_SHORT || vars.ALLOW_SHORT }}
+          TAKE_PROFIT_R_TREND: ${{ secrets.TAKE_PROFIT_R_TREND || vars.TAKE_PROFIT_R_TREND }}
+          BREAKEVEN_AT_R: ${{ secrets.BREAKEVEN_AT_R || vars.BREAKEVEN_AT_R }}
+          TRAIL_START_R: ${{ secrets.TRAIL_START_R || vars.TRAIL_START_R }}
+          TRAIL_ATR_MULT: ${{ secrets.TRAIL_ATR_MULT || vars.TRAIL_ATR_MULT }}
+          MAX_HOLDING_DAYS_TREND: ${{ secrets.MAX_HOLDING_DAYS_TREND || vars.MAX_HOLDING_DAYS_TREND }}
+          MAX_HOLDING_DAYS_MR: ${{ secrets.MAX_HOLDING_DAYS_MR || vars.MAX_HOLDING_DAYS_MR }}
+          EXIT_ON_TREND_REVERSAL: ${{ secrets.EXIT_ON_TREND_REVERSAL || vars.EXIT_ON_TREND_REVERSAL }}
+          STOP_LOSS_COOLDOWN_HOURS: ${{ secrets.STOP_LOSS_COOLDOWN_HOURS || vars.STOP_LOSS_COOLDOWN_HOURS }}
+          NO_TRADE_AFTER_OPEN_MIN: ${{ secrets.NO_TRADE_AFTER_OPEN_MIN || vars.NO_TRADE_AFTER_OPEN_MIN }}
+          NO_NEW_TRADES_BEFORE_CLOSE_MIN: ${{ secrets.NO_NEW_TRADES_BEFORE_CLOSE_MIN || vars.NO_NEW_TRADES_BEFORE_CLOSE_MIN }}
+          MAX_ENTRY_SLIPPAGE_PCT: ${{ secrets.MAX_ENTRY_SLIPPAGE_PCT || vars.MAX_ENTRY_SLIPPAGE_PCT }}
+          MAX_EXIT_SLIPPAGE_PCT: ${{ secrets.MAX_EXIT_SLIPPAGE_PCT || vars.MAX_EXIT_SLIPPAGE_PCT }}
+          BARS_DATA_FEED: ${{ secrets.BARS_DATA_FEED || vars.BARS_DATA_FEED }}
+        run: python -m src.main

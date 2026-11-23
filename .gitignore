@@ -1,0 +1,39 @@
+# --- Segreti (MAI committare) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Ambienti virtuali ---
+.venv/
+venv/
+env/
+
+# --- Log e dati locali ---
+*.log
+logs/
+*.sqlite
+*.db
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
