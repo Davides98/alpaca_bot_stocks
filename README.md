@@ -110,6 +110,21 @@ score < `MIN_OPPORTUNITY_SCORE`.
   negli ultimi 15 minuti niente nuovi trade.
 - **Pausa dopo uno stop loss:** il ticker non viene ritradato per 24 ore.
 
+### Conti piccoli: azioni frazionarie
+
+Con un conto da 1.000 $ il rischio massimo per trade è 10 $ e la posizione massima 200 $: quasi nessun titolo della watchlist
+si può comprare a quantità intere. Con `FRACTIONAL_SHARES=true` (default) il bot compra **frazioni di azione** (4 decimali, minimo 1 $).
+
+Alpaca accetta le frazioni solo con ordini **DAY** e **senza OCO**, quindi per queste posizioni:
+
+- lo **stop loss** è un ordine stop DAY lato broker, che il bot ricrea ogni giorno all'apertura;
+- il **take profit** lo esegue il bot (controllo ogni minuto, ordine limit);
+- se Alpaca rifiuta lo stop frazionario, anche lo stop lo esegue il bot.
+
+Le posizioni a quantità intera continuano a usare l'OCO GTC. Gli **short** richiedono un conto a margine (almeno 2.000 $):
+se l'account non li consente, il bot li disattiva da solo. Imposta `INITIAL_CAPITAL` al capitale reale dell'account
+(es. `1000`) per avere il rendimento corretto in dashboard.
+
 ---
 
 ## 1. Setup locale e test in DRY_RUN
