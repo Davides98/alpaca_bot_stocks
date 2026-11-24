@@ -107,6 +107,13 @@ class Settings(BaseSettings):
     BREAKEVEN_AT_R: float = Field(default=1.0, ge=0, le=10)  # 0 = disattivato
     TRAIL_START_R: float = Field(default=1.5, ge=0, le=20)  # 0 = disattivato; solo strategie di trend
     TRAIL_ATR_MULT: float = Field(default=2.5, gt=0, le=10)
+    # Target dinamico
+    # Mean reversion: il target segue la media mobile a 20 giorni (aggiornata a ogni ciclo di trading),
+    # ma non scende mai sotto ingresso + MR_TARGET_MIN_R x R (long; speculare per gli short).
+    DYNAMIC_MR_TARGET: bool = True
+    MR_TARGET_MIN_R: float = Field(default=0.25, ge=0, le=5)
+    # Trend: quando parte il trailing stop il target viene tolto e il profitto "corre" finché il trailing non chiude.
+    REMOVE_TARGET_ON_TRAIL: bool = True
     # Uscite temporali e di regime
     MAX_HOLDING_DAYS_TREND: int = Field(default=30, ge=1, le=365)
     MAX_HOLDING_DAYS_MR: int = Field(default=10, ge=1, le=365)

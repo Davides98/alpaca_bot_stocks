@@ -348,6 +348,39 @@ class OrderExecutor:
         self.cancel_symbol_orders(symbol, label)
         return self.protect(symbol, is_long, qty, new_stop, prot.tp_price, label)
 
+    def replace_target(self, prot: Protection, new_tp: float, symbol: str, is_long: bool, qty: float, label: str) -> Protection:
+        """
+        Sposta il target. Con un OCO prova il replace dell'ordine limit; se non riesce ricrea la protezione.
+        Senza ordine target lato broker (posizioni frazionarie) non c'è nulla da modificare: il bot usa il
+        nuovo target salvato su Supabase.
+        """
+        if self.s.DRY_RUN:
+            logger.warning("[{}] DRY_RUN: target NON spostato ({} -> {:.2f})", label, prot.tp_price, new_tp)
+            return prot
+        if not prot.tp_order_id:
+            return prot
+        try:
+            new = self.client.replace_order_by_id(prot.tp_order_id, ReplaceOrderRequest(limit_price=round(new_tp, 2)))
+            logger.success("[{}] Target lato broker spostato {:.2f} -> {:.2f}", label, prot.tp_price or 0, new_tp)
+            return Protection(stop_order_id=prot.stop_order_id, stop_price=prot.stop_price, tp_order_id=str(new.id),
+                              tp_price=new_tp, parent_id=prot.parent_id)
+        except APIError as exc:
+            logger.info("[{}] Replace del target non disponibile ({}): ricreo la protezione", label, str(exc)[:160])
+        if prot.stop_price is None:
+            return prot
+        self.cancel_symbol_orders(symbol, label)
+        return self.protect(symbol, is_long, qty, prot.stop_price, new_tp, label)
+
+    def remove_target(self, prot: Protection, symbol: str, is_long: bool, qty: float, label: str) -> Protection:
+        """Toglie il target lasciando solo lo stop (l'OCO diventa uno stop GTC, o DAY se la quantità è frazionaria)."""
+        if self.s.DRY_RUN:
+            logger.warning("[{}] DRY_RUN: target NON rimosso", label)
+            return prot
+        if not prot.tp_order_id or prot.stop_price is None:
+            return prot  # nessun ordine target lato broker: basta toglierlo su Supabase
+        self.cancel_symbol_orders(symbol, label)
+        return self.protect(symbol, is_long, qty, prot.stop_price, None, label)
+
     # ------------------------------------------------------------------ #
     # Chiusura volontaria
     # ------------------------------------------------------------------ #

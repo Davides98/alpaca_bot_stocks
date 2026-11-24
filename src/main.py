@@ -81,6 +81,9 @@ def exit_rules(settings: Settings) -> dict[str, Any]:
         "trail_atr_mult": settings.TRAIL_ATR_MULT,
         "take_profit_r_trend": settings.TAKE_PROFIT_R_TREND,
         "exit_on_trend_reversal": settings.EXIT_ON_TREND_REVERSAL,
+        "dynamic_mr_target": settings.DYNAMIC_MR_TARGET,
+        "mr_target_min_r": settings.MR_TARGET_MIN_R,
+        "remove_target_on_trail": settings.REMOVE_TARGET_ON_TRAIL,
         "pause_after_open_min": settings.NO_TRADE_AFTER_OPEN_MIN,
     }
 
@@ -126,6 +129,8 @@ def plan_to_trade_row(plan: TradePlan, regime: MarketRegime, fill: float, qty: f
             "regime": regime_snapshot(regime),
             "exit_rules": exit_rules(settings),
             "stop_history": [],
+            "initial_target": target,
+            "target_history": [],
         },
     }
 

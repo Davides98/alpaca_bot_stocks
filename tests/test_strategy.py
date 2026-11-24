@@ -331,3 +331,18 @@ def test_position_size_fractional():
     assert position_size(1_000, 314.56, 10.18, 0.01, 0.20, 1_000, 1_000, fractional=True) == pytest.approx(0.6358)
     assert position_size(1_000, 314.56, 10.18, 0.01, 0.20, 1_000, 1_000) == 0  # intere: nemmeno 1 azione
     assert position_size(1_000, 500.0, 10.0, 0.01, 0.20, 0.4, fractional=True) == 0  # sotto 1 $ di controvalore
+
+
+def test_dynamic_targets(s):
+    from src.execution.risk_manager import mr_dynamic_target, should_remove_target, target_changed
+    # Long: la media scende da 100 a 97 -> target 97; mai sotto ingresso + 0,25R (90 + 0,75 = 90,75)
+    assert mr_dynamic_target(True, 90.0, 3.0, 97.0, 0.25) == 97.0
+    assert mr_dynamic_target(True, 90.0, 3.0, 89.0, 0.25) == 90.75
+    # Short speculare: mai sopra ingresso - 0,25R
+    assert mr_dynamic_target(False, 110.0, 3.0, 104.0, 0.25) == 104.0
+    assert mr_dynamic_target(False, 110.0, 3.0, 111.0, 0.25) == 109.25
+    # Soglia minima di spostamento: 5% dell'ATR
+    assert not target_changed(100.0, 100.05, 2.0) and target_changed(100.0, 100.10, 2.0)
+    # Trend: target tolto da +1,5R; mai per la mean reversion
+    assert should_remove_target(True, 1.6, s) and not should_remove_target(True, 1.2, s)
+    assert not should_remove_target(False, 3.0, s)

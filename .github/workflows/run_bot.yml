@@ -86,6 +86,10 @@ jobs:
           BREAKEVEN_AT_R: ${{ secrets.BREAKEVEN_AT_R || vars.BREAKEVEN_AT_R }}
           TRAIL_START_R: ${{ secrets.TRAIL_START_R || vars.TRAIL_START_R }}
           TRAIL_ATR_MULT: ${{ secrets.TRAIL_ATR_MULT || vars.TRAIL_ATR_MULT }}
+          DYNAMIC_MR_TARGET: ${{ secrets.DYNAMIC_MR_TARGET || vars.DYNAMIC_MR_TARGET }}
+          MR_TARGET_MIN_R: ${{ secrets.MR_TARGET_MIN_R || vars.MR_TARGET_MIN_R }}
+          REMOVE_TARGET_ON_TRAIL: ${{ secrets.REMOVE_TARGET_ON_TRAIL || vars.REMOVE_TARGET_ON_TRAIL }}
+          FRACTIONAL_SHARES: ${{ secrets.FRACTIONAL_SHARES || vars.FRACTIONAL_SHARES }}
           MAX_HOLDING_DAYS_TREND: ${{ secrets.MAX_HOLDING_DAYS_TREND || vars.MAX_HOLDING_DAYS_TREND }}
           MAX_HOLDING_DAYS_MR: ${{ secrets.MAX_HOLDING_DAYS_MR || vars.MAX_HOLDING_DAYS_MR }}
           EXIT_ON_TREND_REVERSAL: ${{ secrets.EXIT_ON_TREND_REVERSAL || vars.EXIT_ON_TREND_REVERSAL }}

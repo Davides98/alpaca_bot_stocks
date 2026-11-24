@@ -267,7 +267,8 @@
       </div>
       <p class="text-xs muted px-5 py-3" style="border-top: 1px solid var(--border);">
         <strong class="t2">Stop / Target</strong>: livelli dell'ordine OCO che protegge la posizione lato broker (attivo anche a bot spento);
-        se lo stop è stato spostato (breakeven o trailing) sotto compare quello iniziale.
+        se lo stop è stato spostato (breakeven o trailing) sotto compare quello iniziale. Anche il target può cambiare: nella mean reversion segue la media a 20 giorni,
+        nei trade di trend viene tolto quando parte il trailing stop (<strong class="t2">∞</strong> = nessun target, il profitto corre); sotto compare il target iniziale.
         <strong class="t2">Rischio iniziale</strong>: perdita allo stop iniziale = |entrata − stop| × azioni (1R), e la sua % sul capitale.
         <strong class="t2">R</strong>: profitto espresso in multipli del rischio iniziale (+2R = guadagnato il doppio di quanto si rischiava).
         Eventuali commissioni o costi di prestito titoli (short) non sono inclusi.
@@ -283,6 +284,43 @@
         </div>
       </div>
       <div class="matrix" id="matrix"></div>
+    </section>
+
+    <!-- Gestione dinamica di stop e target -->
+    <section class="card p-5" aria-labelledby="exitsTitle">
+      <h2 id="exitsTitle" class="text-base font-semibold">Come si muovono stop e target</h2>
+      <p class="text-sm muted mt-1">Stop e target vengono fissati all'ingresso, poi il bot li adatta ogni minuto. Lo stop si muove solo a favore, mai indietro.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 text-sm">
+        <div class="rule" style="margin-top:0">
+          <div class="flex items-center gap-2"><strong>Trend</strong><span class="muted">Breakout · Pullback · Rally · Breakdown</span></div>
+          <ol class="t2 mt-2 space-y-1" style="list-style: decimal; padding-left: 20px; line-height: 1.55;">
+            <li><strong>Ingresso</strong>: stop a 2 ATR (breakout) o 1,5 ATR (pullback), target a <strong>3R</strong>.</li>
+            <li><strong>+1R</strong>: lo stop sale al prezzo di ingresso (<em>breakeven</em>): il trade non può più perdere.</li>
+            <li><strong>+1,5R</strong>: parte il <em>trailing stop</em> a 2,5 ATR dal prezzo e <strong>il target viene tolto</strong>.
+              Un trend forte può andare ben oltre 3R: il bot non chiude più a un prezzo fisso e lascia correre il profitto.</li>
+            <li><strong>Uscita</strong>: quando il prezzo torna indietro di 2,5 ATR e tocca lo stop, oppure se il trend si inverte o dopo 30 giorni.</li>
+          </ol>
+          <p class="muted mt-2">Esempio: long a 100 $, ATR 2 $, stop 96 $ (1R = 4 $), target 112 $. A 104 $ lo stop va a 100 $.
+            A 106 $ lo stop sale a 101 $ e il target sparisce; se il titolo arriva a 125 $ lo stop è a 120 $: un guadagno di +5R invece dei +3R del target.</p>
+          <p class="muted mt-1">Il rovescio della medaglia: dal massimo raggiunto si restituiscono fino a 2,5 ATR di guadagno.</p>
+        </div>
+        <div class="rule" style="margin-top:0">
+          <div class="flex items-center gap-2"><strong>Mean reversion</strong><span class="muted">Long sotto la banda inferiore · Short sopra la superiore</span></div>
+          <ol class="t2 mt-2 space-y-1" style="list-style: decimal; padding-left: 20px; line-height: 1.55;">
+            <li><strong>Ingresso</strong>: stop a 1,25 ATR, target = <strong>media mobile a 20 giorni</strong>.</li>
+            <li><strong>Ogni ciclo</strong>: la media viene ricalcolata e <strong>il target la segue</strong>. Se il prezzo resta basso la media scende verso di lui:
+              il target si avvicina e diventa più realistico, invece di restare al livello di giorni prima.</li>
+            <li><strong>Pavimento</strong>: il target non scende mai sotto ingresso + 0,25R (long), così non diventa mai una perdita.
+              Se la media scende sotto il pavimento, il trade si chiude con il time stop (10 giorni) o con l'inversione di trend.</li>
+            <li><strong>+1R</strong>: stop a breakeven. Niente trailing: l'obiettivo è il ritorno alla media, non un trend.</li>
+          </ol>
+          <p class="muted mt-2">Esempio: long a 92 $ con la media a 100 $ (target 100 $), stop 89,50 $ (1R = 2,50 $).
+            Dopo qualche giorno la media è scesa a 97,20 $: il target diventa 97,20 $. Il pavimento è 92,63 $.</p>
+        </div>
+      </div>
+      <p class="text-xs muted mt-3">Per le posizioni a quantità intera il target è un ordine limit su Alpaca, che il bot modifica o cancella.
+        Per le azioni frazionarie il target lo esegue il bot. Ogni modifica resta nello storico della scheda del trade (pulsante <em>i</em>).
+        Parametri: <code>DYNAMIC_MR_TARGET</code>, <code>MR_TARGET_MIN_R</code>, <code>REMOVE_TARGET_ON_TRAIL</code> (GitHub Variables).</p>
     </section>
 
     <!-- Screening -->
@@ -630,7 +668,7 @@
         side: "LONG", family: "Trend", regime: "BULLISH + LOW_VOL", twin: "Bull Call Spread / Long Call",
         what: "Compra quando il prezzo rompe al rialzo il massimo degli ultimi 20 giorni (canale di Donchian) dentro un trend rialzista, dopo una fase di volatilità compressa.",
         trigger: "Prezzo attuale sopra il massimo a 20 giorni, ma non oltre 0,75 ATR: un breakout già lontano dal livello non viene inseguito.",
-        wins: "Il breakout prosegue: la compressione della volatilità si scarica in un movimento direzionale nel verso del trend.",
+        wins: "Il breakout prosegue: la compressione della volatilità si scarica in un movimento direzionale nel verso del trend. Da +1,5R il target viene tolto e il trailing stop lascia correre il profitto.",
         loses: "Falso breakout: il prezzo rientra sotto il livello e scende fino allo stop (2 ATR sotto l'ingresso).",
         risks: ["Falsi breakout frequenti nei mercati senza direzione", "Gap di apertura oltre lo stop (lo stop diventa un ordine al mercato)"],
       },
@@ -638,7 +676,7 @@
         side: "LONG", family: "Trend", regime: "BULLISH + HIGH_VOL", twin: "Bull Put Spread",
         what: "In un trend rialzista con volatilità alta non insegue il prezzo: aspetta un ritracciamento verso la media mobile a 20 giorni e compra la debolezza.",
         trigger: "Prezzo entro 1 ATR dalla EMA20, sempre sopra la EMA50, con RSI(14) ≤ 50 (il momentum di breve si è scaricato).",
-        wins: "Il trend riprende dopo la correzione: si è comprato a sconto rispetto al massimo recente.",
+        wins: "Il trend riprende dopo la correzione: si è comprato a sconto rispetto al massimo recente. Da +1,5R il target viene tolto e il trailing stop lascia correre il profitto.",
         loses: "Il ritracciamento diventa un'inversione: il prezzo rompe la struttura del trend e tocca lo stop (1,5 ATR).",
         risks: ["In alta volatilità i ritracciamenti possono essere profondi", "Uscita anticipata se il regime diventa BEARISH"],
       },
@@ -646,7 +684,7 @@
         side: "SHORT", family: "Trend", regime: "BEARISH + LOW_VOL", twin: "Bear Put Spread / Long Put",
         what: "Vende allo scoperto quando il prezzo rompe al ribasso il minimo degli ultimi 20 giorni dentro un trend ribassista.",
         trigger: "Prezzo sotto il minimo a 20 giorni, ma non oltre 0,75 ATR.",
-        wins: "Il ribasso accelera dopo la rottura del supporto.",
+        wins: "Il ribasso accelera dopo la rottura del supporto. Da +1,5R il target viene tolto e il trailing stop lascia correre il profitto.",
         loses: "Short squeeze o rimbalzo: il prezzo risale fino allo stop (2 ATR sopra l'ingresso).",
         risks: ["Uno short ha perdita teorica illimitata (lo stop la limita, salvo gap)", "Costi di prestito titoli nei conti reali"],
       },
@@ -654,7 +692,7 @@
         side: "SHORT", family: "Trend", regime: "BEARISH + HIGH_VOL", twin: "Bear Call Spread",
         what: "In un trend ribassista con volatilità alta aspetta un rimbalzo verso la EMA20 e vende la forza.",
         trigger: "Prezzo entro 1 ATR dalla EMA20, sempre sotto la EMA50, con RSI(14) ≥ 50.",
-        wins: "Il rimbalzo si esaurisce e il trend ribassista riprende.",
+        wins: "Il rimbalzo si esaurisce e il trend ribassista riprende. Da +1,5R il target viene tolto e il trailing stop lascia correre il profitto.",
         loses: "Il rimbalzo diventa un'inversione rialzista: stop a 1,5 ATR sopra l'ingresso.",
         risks: ["Rimbalzi violenti tipici dei mercati ribassisti", "Uscita anticipata se il regime diventa BULLISH"],
       },
@@ -662,7 +700,7 @@
         side: "LONG", family: "Mean reversion", regime: "SIDEWAYS + HIGH_VOL", twin: "Iron Condor (lato put)",
         what: "In un mercato laterale e volatile compra gli eccessi al ribasso, puntando al ritorno verso la media.",
         trigger: "Prezzo sotto la banda di Bollinger inferiore (20 giorni, 2 deviazioni standard).",
-        wins: "Il prezzo torna verso la media mobile a 20 giorni (target).",
+        wins: "Il prezzo torna verso la media mobile a 20 giorni. Il target segue la media giorno per giorno, quindi resta realistico anche se la media si avvicina al prezzo.",
         loses: "Il range si rompe e parte un trend ribassista: stop a 1,25 ATR.",
         risks: ["Rapporto rischio/rendimento più basso dei trade di trend (alta probabilità, guadagno limitato)", "Time stop più corto: 10 giorni"],
       },
@@ -670,7 +708,7 @@
         side: "SHORT", family: "Mean reversion", regime: "SIDEWAYS + HIGH_VOL", twin: "Iron Condor (lato call)",
         what: "In un mercato laterale e volatile vende allo scoperto gli eccessi al rialzo, puntando al ritorno verso la media.",
         trigger: "Prezzo sopra la banda di Bollinger superiore.",
-        wins: "Il prezzo torna verso la media mobile a 20 giorni (target).",
+        wins: "Il prezzo torna verso la media mobile a 20 giorni. Il target segue la media giorno per giorno, quindi resta realistico anche se la media si avvicina al prezzo.",
         loses: "Il range si rompe al rialzo: stop a 1,25 ATR.",
         risks: ["Uno short ha perdita teorica illimitata (lo stop la limita, salvo gap)", "Time stop più corto: 10 giorni"],
       },
@@ -704,6 +742,12 @@
       if (t.status === "OPEN") return n(t.r_multiple);
       if (!risk || !qty || n(t.pnl) === null) return null;
       return n(t.pnl) / (risk * qty);
+    }
+
+    function targetNote(t, tp) {
+      const tp0 = initialTarget(t);
+      if (tp0 === null || (tp !== null && Math.abs(tp0 - tp) <= 0.005)) return "";
+      return `<div class="muted text-xs">target iniziale ${fmtPx(tp0)}${tp === null ? " · ora trailing" : ""}</div>`;
     }
 
     function renderTrades() {
@@ -744,7 +788,7 @@
           <td><div class="flex items-center gap-1.5">${esc(prettyStrategy(t.strategy))}${infoButton(t.strategy, t.id)}</div><div class="mt-1">${status}</div></td>
           <td class="r num">${qty !== null ? qtyFmt.format(qty) : "–"}${t.details_json?.fractional ? '<div class="muted text-xs">frazionaria</div>' : ""}</td>
           <td class="r num">${fmtPx(entry)}<div class="muted text-xs">${entry && qty ? usd0.format(entry * qty) : ""}</div></td>
-          <td class="r num"><span class="bad">${fmtPx(stop)}</span> / <span class="good">${fmtPx(tp)}</span>${init !== null && stop !== null && Math.abs(init - stop) > 0.005 ? `<div class="muted text-xs">stop iniziale ${fmtPx(init)}</div>` : ""}</td>
+          <td class="r num"><span class="bad">${fmtPx(stop)}</span> / ${tp !== null ? `<span class="good">${fmtPx(tp)}</span>` : '<span class="good" title="Target tolto: il profitto corre con il trailing stop">∞</span>'}${init !== null && stop !== null && Math.abs(init - stop) > 0.005 ? `<div class="muted text-xs">stop iniziale ${fmtPx(init)}</div>` : ""}${targetNote(t, tp)}</td>
           <td class="r num">${fmtPx(now)}<div class="muted text-xs">${isOpen ? "attuale" : "uscita"}</div></td>
           <td class="r num">${risk !== null ? usd.format(risk) : "–"}<div class="muted text-xs">${risk !== null && equity ? num2.format((risk / equity) * 100) + "% del capitale" : ""}</div></td>
           <td class="r num ${r !== null ? cls(r) : ""}">${r !== null ? signed(r, (x) => num2.format(x)) + "R" : "–"}</td>
@@ -772,19 +816,29 @@
         ${cell("NO_TRADE")}`;
     }
 
-    // Livelli del trade su una scala di prezzo: stop, ingresso, attuale/uscita, target
+    // Target iniziale del trade (salvato all'ingresso; per i trade più vecchi: il primo "from" dello storico)
+    function initialTarget(t) {
+      const d = t.details_json || {};
+      if (d.initial_target !== undefined && d.initial_target !== null) return n(d.initial_target);
+      return d.target_history?.length ? n(d.target_history[0].from) : n(t.take_profit);
+    }
+    const isMeanReversion = (s) => String(s || "").startsWith("MEAN_REVERSION");
+
+    // Livelli del trade su una scala di prezzo: stop (attuale e iniziale), ingresso, attuale/uscita, target (attuale e iniziale)
     function levelsSvg(t) {
-      const entry = n(t.entry_price), stop = n(t.stop_price), tp = n(t.take_profit), init = n(t.initial_stop);
+      const entry = n(t.entry_price), stop = n(t.stop_price), tp = n(t.take_profit), init = n(t.initial_stop), tp0 = initialTarget(t);
       const cur = t.status === "OPEN" ? n(t.current_price) : n(t.exit_price);
-      if (entry === null || stop === null || tp === null) return "";
+      if (entry === null || stop === null) return "";
       const good = cssVar("--good"), bad = cssVar("--bad"), text2 = cssVar("--text-2"), muted = cssVar("--muted"), series = cssVar("--series");
-      const pts = [{ k: "Stop", v: stop, c: bad }, { k: "Ingresso", v: entry, c: text2 }, { k: "Target", v: tp, c: good }];
+      const pts = [{ k: "Stop", v: stop, c: bad }, { k: "Ingresso", v: entry, c: text2 }];
+      if (tp !== null) pts.push({ k: "Target", v: tp, c: good });
+      if (tp0 !== null && (tp === null || Math.abs(tp0 - tp) > 0.005)) pts.push({ k: "Target iniziale", v: tp0, c: muted });
       if (init !== null && Math.abs(init - stop) > 0.005) pts.push({ k: "Stop iniziale", v: init, c: muted });
       if (cur !== null) pts.push({ k: t.status === "OPEN" ? "Attuale" : "Uscita", v: cur, c: series });
       const vals = pts.map((p) => p.v), lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.06 || 1;
       const W = 680, H = 120, x0 = 20, x1 = W - 20, y = 62;
       const x = (v) => x0 + ((v - (lo - pad)) / (hi - lo + 2 * pad)) * (x1 - x0);
-      const seg = (a, b, c) => `<line x1="${x(a)}" y1="${y}" x2="${x(b)}" y2="${y}" stroke="${c}" stroke-width="6" stroke-linecap="round" opacity=".55"/>`;
+      const seg = (a, b, c, dash) => `<line x1="${x(a)}" y1="${y}" x2="${x(b)}" y2="${y}" stroke="${c}" stroke-width="6" stroke-linecap="round" opacity=".55"${dash ? ' stroke-dasharray="10 9"' : ""}/>`;
       const sorted = pts.slice().sort((a, b) => a.v - b.v);
       const marks = sorted.map((p, i) => {
         const up = i % 2 === 0, ty = up ? y - 18 : y + 30;
@@ -792,30 +846,54 @@
           <text x="${x(p.v)}" y="${ty}" text-anchor="middle" font-size="11" fill="${p.c}">${esc(p.k)}</text>
           <text x="${x(p.v)}" y="${ty + 13}" text-anchor="middle" font-size="11" fill="${muted}">${num2.format(p.v)}</text>`;
       }).join("");
+      // Senza target (tolto dal trailing) la zona di profitto è tratteggiata fino al bordo: il profitto può correre
+      const isLong = t.side !== "SHORT";
+      const profit = tp !== null ? seg(entry, tp, good) : seg(entry, isLong ? hi + pad : lo - pad, good, true);
       return `<svg class="levels" viewBox="0 0 ${W} ${H}" role="img" aria-label="Livelli di prezzo del trade">
         <line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${cssVar("--grid")}" stroke-width="2"/>
-        ${seg(stop, entry, bad)}${seg(entry, tp, good)}${marks}</svg>`;
+        ${seg(stop, entry, bad)}${profit}${marks}</svg>`;
+    }
+
+    const TARGET_KIND = { mean: "segue la media a 20 giorni", removed: "tolto: parte il trailing stop" };
+    function targetHistoryHtml(t) {
+      const h = t.details_json?.target_history || [];
+      if (!h.length) return "";
+      const rows = h.slice(-6).reverse().map((e) =>
+        `<li>${dtShortFmt.format(new Date(e.at))}: ${fmtPx(n(e.from))} → ${e.to === null ? "nessun target" : fmtPx(n(e.to))} <span class="muted">(${esc(TARGET_KIND[e.kind] || e.kind)})</span></li>`).join("");
+      return `<div class="rule"><strong>Storico del target</strong>${h.length > 6 ? ` <span class="muted">(ultimi 6 di ${h.length})</span>` : ""}<ul class="mt-1">${rows}</ul></div>`;
     }
 
     function exitRulesHtml(t) {
       const rules = t?.details_json?.exit_rules || {};
       const be = rules.breakeven_at_r ?? 1, trailStart = rules.trail_start_r ?? 1.5, trailAtr = rules.trail_atr_mult ?? 2.5;
+      const minR = rules.mr_target_min_r ?? 0.25;
+      const dynMr = rules.dynamic_mr_target !== false, removeOnTrail = rules.remove_target_on_trail !== false;
       const items = [];
       if (t) {
         const isLong = t.side !== "SHORT", entry = n(t.entry_price), risk = n(t.risk_per_share), atr = n(t.details_json?.atr);
-        const dir = isLong ? 1 : -1, maxDays = n(t.details_json?.max_holding_days);
-        items.push(`<div class="rule"><strong>Stop loss</strong> (ordine stop lato broker, ${t.details_json?.protection === "OCO" ? "GTC" : "DAY, ricreato ogni giorno dal bot"}): ${fmtPx(n(t.stop_price))}${n(t.initial_stop) !== null && Math.abs(n(t.initial_stop) - n(t.stop_price)) > 0.005 ? ` · iniziale ${fmtPx(n(t.initial_stop))}` : ""}</div>`);
-        items.push(t.details_json?.protection === "OCO"
-          ? `<div class="rule"><strong>Take profit</strong> (ordine limit lato broker, nello stesso OCO): ${fmtPx(n(t.take_profit))}</div>`
-          : `<div class="rule"><strong>Take profit</strong> (eseguito dal bot: Alpaca non accetta OCO sulle azioni frazionarie): ${fmtPx(n(t.take_profit))}</div>`);
+        const dir = isLong ? 1 : -1, maxDays = n(t.details_json?.max_holding_days), tp = n(t.take_profit), tp0 = initialTarget(t);
+        const trend = STRATEGIES[t.strategy]?.family === "Trend";
+        const oco = t.details_json?.protection === "OCO";
+        const fractional = t.details_json?.fractional ?? !Number.isInteger(Number(t.qty));
+        items.push(`<div class="rule"><strong>Stop loss</strong> (ordine stop lato broker, ${fractional ? "DAY, ricreato ogni giorno dal bot" : "GTC"}): ${fmtPx(n(t.stop_price))}${n(t.initial_stop) !== null && Math.abs(n(t.initial_stop) - n(t.stop_price)) > 0.005 ? ` · iniziale ${fmtPx(n(t.initial_stop))}` : ""}</div>`);
+        if (tp === null) {
+          items.push(`<div class="rule"><strong>Take profit</strong>: nessuno. Il target iniziale (${fmtPx(tp0)}) è stato tolto quando è partito il trailing stop: il profitto corre finché lo stop non chiude la posizione.</div>`);
+        } else {
+          items.push(`<div class="rule"><strong>Take profit</strong> (${oco ? "ordine limit lato broker, nello stesso OCO" : "eseguito dal bot: Alpaca non accetta OCO sulle azioni frazionarie"}): ${fmtPx(tp)}${tp0 !== null && Math.abs(tp0 - tp) > 0.005 ? ` · iniziale ${fmtPx(tp0)}` : ""}</div>`);
+        }
         if (entry && risk && be > 0) items.push(`<div class="rule"><strong>Breakeven</strong>: a ${num2.format(entry + dir * be * risk)} (+${be}R) lo stop sale al prezzo di ingresso ${fmtPx(entry)}.</div>`);
-        if (entry && risk && atr && trailStart > 0 && STRATEGIES[t.strategy]?.family === "Trend")
-          items.push(`<div class="rule"><strong>Trailing stop</strong>: da ${num2.format(entry + dir * trailStart * risk)} (+${trailStart}R) lo stop segue il prezzo a ${trailAtr} ATR (${num2.format(trailAtr * atr)} $).</div>`);
+        if (entry && risk && atr && trailStart > 0 && trend)
+          items.push(`<div class="rule"><strong>Trailing stop</strong>: da ${num2.format(entry + dir * trailStart * risk)} (+${trailStart}R) lo stop segue il prezzo a ${trailAtr} ATR (${num2.format(trailAtr * atr)} $)` +
+            (removeOnTrail ? ` e <strong>il target viene tolto</strong>: si lascia correre il profitto.` : ".") + `</div>`);
+        if (entry && risk && dynMr && isMeanReversion(t.strategy))
+          items.push(`<div class="rule"><strong>Target dinamico</strong>: segue la media mobile a 20 giorni, ricalcolata a ogni ciclo, ma non va mai ${isLong ? "sotto" : "sopra"} ${num2.format(entry + dir * minR * risk)} (ingresso ${isLong ? "+" : "−"} ${minR}R), così non diventa mai una perdita.</div>`);
         if (maxDays) items.push(`<div class="rule"><strong>Time stop</strong>: chiusura dopo ${maxDays} giorni, il ${dFmt.format(new Date(new Date(t.created_at).getTime() + maxDays * 86_400_000))}.</div>`);
         if (rules.exit_on_trend_reversal !== false) items.push(`<div class="rule"><strong>Inversione di trend</strong>: chiusura se il regime diventa ${isLong ? "BEARISH" : "BULLISH"}.</div>`);
+        items.push(targetHistoryHtml(t));
       } else {
-        items.push(`<div class="rule"><strong>Stop e target</strong> lato broker (ordine OCO), quindi attivi anche a bot spento. Target: 3R per i trade di trend, la media mobile per la mean reversion.</div>`);
+        items.push(`<div class="rule"><strong>Stop e target</strong> lato broker (OCO) per le quantità intere; per le frazioni stop lato broker e target eseguito dal bot.</div>`);
         items.push(`<div class="rule"><strong>Breakeven</strong> a +${be}R; <strong>trailing</strong> da +${trailStart}R a ${trailAtr} ATR (solo trend); <strong>time stop</strong>; <strong>inversione di trend</strong>.</div>`);
+        items.push(`<div class="rule"><strong>Target dinamico</strong>: trend → target 3R, tolto quando parte il trailing stop; mean reversion → il target segue la media a 20 giorni (mai sotto ingresso + ${minR}R).</div>`);
       }
       return items.join("");
     }
@@ -826,7 +904,7 @@
       $("stratTitle").innerHTML = `${esc(prettyStrategy(strategy))}${trade ? ` <span class="muted">· ${esc(trade.ticker)}</span>` : ""}`;
       $("stratTags").innerHTML = [info.family, info.regime, info.side, `gemella in opzioni: ${info.twin}`].filter(Boolean)
         .map((x) => `<span class="tag">${esc(x)}</span>`).join("");
-      const why = trade?.details_json
+      const why = trade?.details_json?.rationale
         ? `<h3>Perché il bot l'ha scelta</h3><p>Regime ${esc(trade.details_json.rationale || "")}. Segnale: ${esc(trade.details_json.signal || "–")}.
            Rapporto rischio/rendimento al segnale ${trade.details_json.reward_risk ? num2.format(trade.details_json.reward_risk) + "R" : "–"}.</p>`
         : "";

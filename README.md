@@ -101,6 +101,12 @@ score < `MIN_OPPORTUNITY_SCORE`.
 - **Gestione dinamica** (ogni 60 s in sessione, solo in avanti):
   - **breakeven:** a +1R lo stop sale al prezzo di ingresso;
   - **trailing stop** (solo trade di trend): da +1,5R lo stop segue il prezzo a 2,5 ATR;
+  - **target dinamico:**
+    - *trend*: quando parte il trailing stop (+1,5R) il target a 3R viene **tolto**: il profitto corre finché il trailing non chiude la posizione;
+    - *mean reversion*: il target **segue la media mobile a 20 giorni**, ricalcolata a ogni ciclo, ma non scende mai sotto ingresso + 0,25R
+      (long; speculare per gli short), quindi non diventa mai una perdita;
+    - con un OCO il bot modifica o cancella l'ordine target su Alpaca; con le azioni frazionarie aggiorna il target che esegue lui.
+      Ogni modifica è salvata in `details_json.target_history` ed è visibile nella scheda del trade in dashboard;
   - **time stop:** chiusura dopo 30 giorni (trend) o 10 giorni (mean reversion);
   - **inversione di trend:** un long viene chiuso se il regime diventa `BEARISH`, uno short se diventa `BULLISH`;
   - **protezione mancante** (ordine cancellato a mano, scaduto…): viene ricreata; se il prezzo ha già superato lo stop, la posizione viene chiusa.
@@ -227,6 +233,9 @@ Crea una **Variable** (o un Secret) con uno di questi nomi; se non esiste vale i
 | `TAKE_PROFIT_R_TREND` | `3.0` | target dei trade di trend in multipli di R |
 | `BREAKEVEN_AT_R` | `1.0` | profitto (in R) oltre cui lo stop va a breakeven (`0` = mai) |
 | `TRAIL_START_R` / `TRAIL_ATR_MULT` | `1.5` / `2.5` | avvio e distanza del trailing stop (`0` = mai) |
+| `REMOVE_TARGET_ON_TRAIL` | `true` | trend: toglie il target quando parte il trailing stop |
+| `DYNAMIC_MR_TARGET` / `MR_TARGET_MIN_R` | `true` / `0.25` | mean reversion: target che segue la media, mai sotto ingresso + 0,25R |
+| `FRACTIONAL_SHARES` | `true` | azioni frazionarie per i conti piccoli |
 | `MAX_HOLDING_DAYS_TREND` / `MAX_HOLDING_DAYS_MR` | `30` / `10` | time stop in giorni |
 | `EXIT_ON_TREND_REVERSAL` | `true` | chiude se il regime si gira contro la posizione |
 | `STOP_LOSS_COOLDOWN_HOURS` | `24` | pausa su un ticker dopo uno stop loss |

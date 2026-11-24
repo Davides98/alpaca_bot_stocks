@@ -81,6 +81,26 @@ def next_stop(
     return candidate if improvement >= min_step - 1e-9 else None
 
 
+def mr_dynamic_target(is_long: bool, entry: float, risk_per_share: float, mean: float, min_r: float) -> float:
+    """
+    Target della mean reversion = media mobile attuale, con un pavimento: mai sotto ingresso + min_r x R
+    (long) / mai sopra ingresso - min_r x R (short). Così il target non diventa mai una perdita.
+    """
+    floor = entry + min_r * risk_per_share if is_long else entry - min_r * risk_per_share
+    return round(max(mean, floor) if is_long else min(mean, floor), 2)
+
+
+def target_changed(old: float, new: float, atr: float | None) -> bool:
+    """Aggiorna il target solo se si sposta in modo significativo (evita di modificare l'ordine ogni minuto)."""
+    return abs(new - old) >= max(0.01, 0.05 * atr if atr else 0.01) - 1e-9
+
+
+def should_remove_target(trend_strategy: bool, r: float, settings: Settings) -> bool:
+    """Trade di trend: il target viene tolto quando parte il trailing stop (il profitto può correre)."""
+    return (trend_strategy and settings.REMOVE_TARGET_ON_TRAIL and settings.TRAIL_START_R > 0
+            and r >= settings.TRAIL_START_R)
+
+
 def stop_hit_reason(is_long: bool, entry: float, stop_fill: float) -> str:
     """Uno stop eseguito in profitto (o in pari) è un trailing stop, altrimenti uno stop loss."""
     pnl = (stop_fill - entry) if is_long else (entry - stop_fill)
@@ -407,6 +427,10 @@ class RiskManager:
                     mp.trade["stop_price"] = new
                     mp.trade["details_json"] = {**mp.details, "stop_history": history[-20:]}
 
+        # 3b) Target dinamico (mean reversion: segue la media; trend: tolto quando parte il trailing)
+        if allow_dynamic:
+            self._adapt_target(mp, regime, r)
+
         # 4) Aggiornamento su Supabase
         if mp.trade and not s.DRY_RUN:
             self.storage.update_trade(mp.trade["id"], {
@@ -417,6 +441,42 @@ class RiskManager:
                 "qty": mp.qty,
             })
         return True
+
+    def _adapt_target(self, mp: ManagedPosition, regime: MarketRegime | None, r: float) -> None:
+        """Aggiorna o toglie il target. Lato broker se c'è un ordine target (OCO), altrimenti solo su Supabase."""
+        s = self.s
+        old = mp.target
+        if old is None:
+            return
+        trend = is_trend_strategy(mp.strategy)
+        if should_remove_target(trend, r, s):
+            kind, new = "removed", None
+            logger.info("[{}] trailing stop attivo ({:+.2f}R): tolgo il target {:.2f}, il profitto può correre",
+                        mp.label, r, old)
+            prot = self.executor.remove_target(mp.protection, mp.symbol, mp.is_long, mp.qty, mp.label)
+        elif not trend and s.DYNAMIC_MR_TARGET and regime is not None and mp.risk_per_share > 0:
+            new = mr_dynamic_target(mp.is_long, mp.entry, mp.risk_per_share, regime.bb_mid, s.MR_TARGET_MIN_R)
+            if not target_changed(old, new, mp.atr or regime.atr):
+                return
+            kind = "mean"
+            logger.info("[{}] target mean reversion aggiornato alla media a 20 giorni: {:.2f} -> {:.2f} (media {:.2f})",
+                        mp.label, old, new, regime.bb_mid)
+            prot = self.executor.replace_target(mp.protection, new, mp.symbol, mp.is_long, mp.qty, mp.label)
+        else:
+            return
+        if s.DRY_RUN:
+            return
+        mp.protection = prot
+        if mp.trade:
+            history = list(mp.details.get("target_history") or [])
+            history.append({"at": datetime.now(timezone.utc).isoformat(), "from": old, "to": new, "kind": kind})
+            details = {**mp.details, "target_history": history[-30:]}
+            details.setdefault("initial_target", old if not history[:-1] else history[0]["from"])
+            if kind == "removed":
+                details["target_removed"] = True
+            self.storage.update_trade(mp.trade["id"], {"take_profit": new, "details_json": details})
+            mp.trade["take_profit"] = new
+            mp.trade["details_json"] = details
 
     def _close(self, mp: ManagedPosition, reason: str, report: RiskReport) -> bool:
         """Chiusura volontaria. True se la posizione è stata chiusa completamente."""

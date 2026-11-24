@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from alpaca.trading.enums import AssetClass, OrderClass, OrderSide, OrderStatus, OrderType, PositionSide, TimeInForce
-from alpaca.trading.requests import StopOrderRequest
+from alpaca.trading.requests import LimitOrderRequest, StopLossRequest, StopOrderRequest, TakeProfitRequest
 
 from config.settings import Settings
 from src.execution.executor import OrderExecutor
@@ -283,3 +283,47 @@ def test_bot_take_profit_on_fractional_position():
     (tid, exit_price, pnl, reason), = storage.closed
     assert (tid, reason) == (11, "TAKE_PROFIT") and pnl == pytest.approx(18.75)
     assert trading.orders[next(iter(trading.orders))].status == OrderStatus.CANCELED  # stop cancellato prima della vendita
+
+
+def _regime(**kw):
+    from src.analysis.regime import MarketRegime, Trend, VolRegime
+    base = dict(ticker="BRK", price=100.0, last_close=100.0, ema_fast=100.0, ema_slow=100.0, adx=15.0, atr=2.0, rsi=45.0,
+                bb_mid=100.0, bb_upper=106.0, bb_lower=94.0, donchian_high=106.0, donchian_low=92.0, hv_current=0.3,
+                hv_min=0.1, hv_max=0.4, vol_rank=70.0, avg_dollar_volume=1e9, trend=Trend.SIDEWAYS, volatility=VolRegime.HIGH_VOL)
+    base.update(kw)
+    return MarketRegime(**base)
+
+
+def test_mean_reversion_target_follows_the_mean():
+    market = FakeMarket({"BRK": 93.0})
+    trade = {"id": 21, "ticker": "BRK", "strategy": "MEAN_REVERSION_LONG", "side": "LONG", "entry_price": 92, "qty": 0.5,
+             "initial_stop": 89.5, "stop_price": 89.5, "take_profit": 100, "risk_per_share": 2.5,
+             "created_at": datetime.now(timezone.utc).isoformat(), "details_json": {"atr": 2, "max_holding_days": 10}}
+    s = settings(DRY_RUN=False)
+    trading, storage = FakeTrading(positions=[_position("BRK", 0.5, 92, 93.0)]), FakeStorage([trade])
+    trading.submit_order(StopOrderRequest(symbol="BRK", qty=0.5, side=OrderSide.SELL, time_in_force=TimeInForce.DAY, stop_price=89.5))
+    services(s, trading, storage, market).risk.manage_open_positions(regimes={"BRK": _regime(bb_mid=97.2)}, allow_dynamic=True)
+    fields = next(f for _, f in storage.updated if "take_profit" in f)
+    assert fields["take_profit"] == 97.2
+    assert fields["details_json"]["initial_target"] == 100
+    assert fields["details_json"]["target_history"][-1] == {**fields["details_json"]["target_history"][-1], "from": 100, "to": 97.2, "kind": "mean"}
+
+
+def test_trend_target_removed_when_trailing_starts():
+    market = FakeMarket({"BRK": 106.5})
+    trade = {"id": 22, "ticker": "BRK", "strategy": "BREAKOUT_LONG", "side": "LONG", "entry_price": 100, "qty": 10,
+             "initial_stop": 96, "stop_price": 100, "take_profit": 112, "risk_per_share": 4,
+             "created_at": datetime.now(timezone.utc).isoformat(), "details_json": {"atr": 2, "max_holding_days": 30}}
+    s = settings(DRY_RUN=False)
+    trading, storage = FakeTrading(positions=[_position("BRK", 10, 100, 106.5)]), FakeStorage([trade])
+    req = LimitOrderRequest(symbol="BRK", qty=10, side=OrderSide.SELL, type=OrderType.LIMIT, time_in_force=TimeInForce.GTC,
+                            order_class=OrderClass.OCO, take_profit=TakeProfitRequest(limit_price=112),
+                            stop_loss=StopLossRequest(stop_price=100))
+    trading.submit_order(req)
+    services(s, trading, storage, market).risk.manage_open_positions(allow_dynamic=True)
+    # +1,6R: trailing (106,5 - 5 = 101,5) e target tolto -> resta solo uno stop GTC
+    last = trading.submitted[-1]
+    assert last.order_class != OrderClass.OCO and last.type == OrderType.STOP and last.time_in_force == TimeInForce.GTC
+    assert last.stop_price == 101.5
+    fields = next(f for _, f in storage.updated if "take_profit" in f)
+    assert fields["take_profit"] is None and fields["details_json"]["target_removed"]
