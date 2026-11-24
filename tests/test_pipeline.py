@@ -33,7 +33,7 @@ class FakeTrading:
     def get_account(self):
         return SimpleNamespace(equity="100000", cash="100000", last_equity="100000", buying_power="200000",
                                long_market_value="0", short_market_value="0", status=None,
-                               shorting_enabled=True, pattern_day_trader=False)
+                               shorting_enabled=True)
 
     def get_all_positions(self):
         return self.positions

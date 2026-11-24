@@ -184,7 +184,7 @@ class Screener:
                     continue
                 if strategy in SHORT_STRATEGIES:
                     if not s.ALLOW_SHORT:
-                        row.reason = "Short disattivati (ALLOW_SHORT=false)"
+                        row.reason = "Short non disponibili (conto senza margine o ALLOW_SHORT=false)"
                         continue
                     if shortable is not None and not shortable(ticker):
                         row.reason = "Titolo non disponibile per lo short (non easy-to-borrow)"

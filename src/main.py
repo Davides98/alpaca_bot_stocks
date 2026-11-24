@@ -257,10 +257,9 @@ def account_snapshot(svc: Services, verbose: bool = False) -> tuple[float, float
     long_value = float(account.long_market_value or 0)
     short_value = float(account.short_market_value or 0)
     if verbose:
-        logger.info("Account {} | buying power ${:,.2f} | shorting {} | PDT {}",
+        logger.info("Account {} | buying power ${:,.2f} | shorting {}",
                     account.status.value if account.status else "?", buying_power,
-                    "abilitato" if account.shorting_enabled else "NON abilitato",
-                    "sì" if account.pattern_day_trader else "no")
+                    "abilitato" if account.shorting_enabled else "NON abilitato")
     svc.storage.save_equity_snapshot(equity, cash, last_equity, long_value, short_value)
     return equity, buying_power
 
@@ -534,6 +533,13 @@ def run(settings: Settings, ctx: RunContext) -> int:
         secret_key=settings.ALPACA_SECRET_KEY.get_secret_value(),
         paper=True,  # forzato: mai live
     )
+
+    # Conti senza margine (es. sotto 2.000 $) non possono vendere allo scoperto: le strategie short vengono disattivate
+    account = trading.get_account()
+    if settings.ALLOW_SHORT and not account.shorting_enabled:
+        logger.warning("Lo short non è abilitato su questo account Alpaca (serve un conto a margine, almeno 2.000 $): "
+                       "strategie short disattivate in questo run")
+        settings.ALLOW_SHORT = False
 
     if settings.SESSION_MODE:
         is_open = wait_for_open(settings, trading, ctx)

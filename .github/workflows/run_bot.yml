@@ -95,4 +95,5 @@ jobs:
           MAX_ENTRY_SLIPPAGE_PCT: ${{ secrets.MAX_ENTRY_SLIPPAGE_PCT || vars.MAX_ENTRY_SLIPPAGE_PCT }}
           MAX_EXIT_SLIPPAGE_PCT: ${{ secrets.MAX_EXIT_SLIPPAGE_PCT || vars.MAX_EXIT_SLIPPAGE_PCT }}
           BARS_DATA_FEED: ${{ secrets.BARS_DATA_FEED || vars.BARS_DATA_FEED }}
+          INITIAL_CAPITAL: ${{ secrets.INITIAL_CAPITAL || vars.INITIAL_CAPITAL }}
         run: python -m src.main
