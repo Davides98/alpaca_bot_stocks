@@ -697,6 +697,7 @@
     // ------------------------------------------------------------------ //
     const n = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
     const fmtPx = (v) => (v === null ? "–" : num2.format(v));
+    const qtyFmt = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 4 });
     const latestEquity = () => Number(state.snapshots.at(-1)?.equity || state.snapshots.at(-1)?.initial_capital || 0);
     function tradeR(t) {
       const risk = n(t.risk_per_share), qty = n(t.qty);
@@ -741,7 +742,7 @@
           <td class="num">${dtShortFmt.format(new Date(t.created_at))}${!isOpen && t.closed_at ? `<div class="muted text-xs">chiusa ${dtShortFmt.format(new Date(t.closed_at))}</div>` : ""}</td>
           <td><div class="flex items-center gap-2"><span class="font-semibold">${esc(t.ticker)}</span>${sidePill(t.side)}</div></td>
           <td><div class="flex items-center gap-1.5">${esc(prettyStrategy(t.strategy))}${infoButton(t.strategy, t.id)}</div><div class="mt-1">${status}</div></td>
-          <td class="r num">${qty ?? "–"}</td>
+          <td class="r num">${qty !== null ? qtyFmt.format(qty) : "–"}${t.details_json?.fractional ? '<div class="muted text-xs">frazionaria</div>' : ""}</td>
           <td class="r num">${fmtPx(entry)}<div class="muted text-xs">${entry && qty ? usd0.format(entry * qty) : ""}</div></td>
           <td class="r num"><span class="bad">${fmtPx(stop)}</span> / <span class="good">${fmtPx(tp)}</span>${init !== null && stop !== null && Math.abs(init - stop) > 0.005 ? `<div class="muted text-xs">stop iniziale ${fmtPx(init)}</div>` : ""}</td>
           <td class="r num">${fmtPx(now)}<div class="muted text-xs">${isOpen ? "attuale" : "uscita"}</div></td>
@@ -803,8 +804,10 @@
       if (t) {
         const isLong = t.side !== "SHORT", entry = n(t.entry_price), risk = n(t.risk_per_share), atr = n(t.details_json?.atr);
         const dir = isLong ? 1 : -1, maxDays = n(t.details_json?.max_holding_days);
-        items.push(`<div class="rule"><strong>Stop loss</strong> (ordine stop lato broker, GTC): ${fmtPx(n(t.stop_price))}${n(t.initial_stop) !== null && Math.abs(n(t.initial_stop) - n(t.stop_price)) > 0.005 ? ` · iniziale ${fmtPx(n(t.initial_stop))}` : ""}</div>`);
-        items.push(`<div class="rule"><strong>Take profit</strong> (ordine limit lato broker, nello stesso OCO): ${fmtPx(n(t.take_profit))}</div>`);
+        items.push(`<div class="rule"><strong>Stop loss</strong> (ordine stop lato broker, ${t.details_json?.protection === "OCO" ? "GTC" : "DAY, ricreato ogni giorno dal bot"}): ${fmtPx(n(t.stop_price))}${n(t.initial_stop) !== null && Math.abs(n(t.initial_stop) - n(t.stop_price)) > 0.005 ? ` · iniziale ${fmtPx(n(t.initial_stop))}` : ""}</div>`);
+        items.push(t.details_json?.protection === "OCO"
+          ? `<div class="rule"><strong>Take profit</strong> (ordine limit lato broker, nello stesso OCO): ${fmtPx(n(t.take_profit))}</div>`
+          : `<div class="rule"><strong>Take profit</strong> (eseguito dal bot: Alpaca non accetta OCO sulle azioni frazionarie): ${fmtPx(n(t.take_profit))}</div>`);
         if (entry && risk && be > 0) items.push(`<div class="rule"><strong>Breakeven</strong>: a ${num2.format(entry + dir * be * risk)} (+${be}R) lo stop sale al prezzo di ingresso ${fmtPx(entry)}.</div>`);
         if (entry && risk && atr && trailStart > 0 && STRATEGIES[t.strategy]?.family === "Trend")
           items.push(`<div class="rule"><strong>Trailing stop</strong>: da ${num2.format(entry + dir * trailStart * risk)} (+${trailStart}R) lo stop segue il prezzo a ${trailAtr} ATR (${num2.format(trailAtr * atr)} $).</div>`);

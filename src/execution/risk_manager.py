@@ -16,6 +16,8 @@ Ad ogni controllo, per ogni posizione azionaria su Alpaca:
    di uscita dagli ordini eseguiti e registra il P&L.
 
 Take profit e stop loss "statici" li esegue Alpaca: il bot non li duplica finché la protezione è attiva.
+Eccezione: le posizioni frazionarie hanno solo lo stop lato broker (Alpaca non accetta OCO sulle frazioni),
+quindi il take profit lo esegue il bot quando il prezzo raggiunge il target.
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ def r_multiple(entry: float, price: float, risk_per_share: float, is_long: bool)
     return ((price - entry) if is_long else (entry - price)) / risk_per_share
 
 
-def realized_pnl(entry: float, exit_price: float, qty: int, is_long: bool) -> float:
+def realized_pnl(entry: float, exit_price: float, qty: float, is_long: bool) -> float:
     return ((exit_price - entry) if is_long else (entry - exit_price)) * qty
 
 
@@ -124,7 +126,7 @@ def _parse_ts(value: Any) -> datetime | None:
 class ManagedPosition:
     symbol: str
     is_long: bool
-    qty: int
+    qty: float  # intera o frazionaria
     entry: float  # prezzo medio di carico (Alpaca)
     price: float  # prezzo attuale
     market_value: float
@@ -268,7 +270,7 @@ class RiskManager:
                 continue
             is_long = str(trade.get("side", "LONG")).upper() == "LONG"
             entry = float(trade["entry_price"])
-            qty = int(trade.get("qty") or 0)
+            qty = float(trade.get("qty") or 0)
             found = self.find_exit_fill(trade["ticker"], is_long, _parse_ts(trade.get("created_at")))
             if found is None:
                 logger.warning("Trade #{} {} OPEN su Supabase ma non su Alpaca e senza uscita trovata: CLOSED (NOT_FOUND_IN_BROKER)",
@@ -312,7 +314,7 @@ class RiskManager:
             logger.info("Nessuna posizione azionaria aperta")
 
         for p in positions:
-            qty = abs(int(float(p.qty)))
+            qty = abs(float(p.qty))
             price = prices.get(p.symbol) or float(p.current_price or p.avg_entry_price)
             mp = ManagedPosition(
                 symbol=p.symbol,
@@ -343,7 +345,7 @@ class RiskManager:
         s = self.s
         r = r_multiple(mp.entry, mp.price, mp.risk_per_share, mp.is_long)
         logger.info(
-            "[{}] x{} | entrata {:.2f} | attuale {:.2f} | P&L ${:+,.2f} ({:+.2f}R) | stop {} | target {} | "
+            "[{}] x{:g} | entrata {:.2f} | attuale {:.2f} | P&L ${:+,.2f} ({:+.2f}R) | stop {} | target {} | "
             "protezione {} | giorni {}",
             mp.label, mp.qty, mp.entry, mp.price, mp.unrealized, r,
             f"{mp.stop:.2f}" if mp.stop is not None else "-", f"{mp.target:.2f}" if mp.target is not None else "-",
@@ -380,6 +382,12 @@ class RiskManager:
                 logger.warning("[{}] protezione assente: la ricreo (stop {:.2f}, target {})", mp.label, stop,
                                f"{target:.2f}" if target else "-")
                 mp.protection = self.executor.protect(mp.symbol, mp.is_long, mp.qty, stop, target, mp.label)
+
+        # 2b) Take profit eseguito dal bot quando non c'è un ordine target lato broker (posizioni frazionarie)
+        if (allow_dynamic and mp.protection.active and mp.protection.tp_order_id is None and mp.target is not None
+                and price_breach(mp.is_long, mp.price, None, mp.target) == "TAKE_PROFIT"):
+            logger.info("[{}] target {:.2f} raggiunto (prezzo {:.2f}): take profit eseguito dal bot", mp.label, mp.target, mp.price)
+            return not self._close(mp, "TAKE_PROFIT", report)
 
         # 3) Stop dinamico
         if allow_dynamic and mp.protection.active and mp.stop is not None:
@@ -428,10 +436,10 @@ class RiskManager:
                                          round(pnl / cost * 100, 4) if cost else None, reason)
             return True
         # Non eseguita (o parziale): la posizione residua va subito protetta di nuovo
-        remaining = mp.qty - result.filled_qty
-        logger.warning("[{}] chiusura non completata ({}): ripristino la protezione su {} azioni",
+        remaining = round(mp.qty - result.filled_qty, 6)
+        logger.warning("[{}] chiusura non completata ({}): ripristino la protezione su {:g} azioni",
                        mp.label, result.message, remaining)
-        if remaining > 0 and mp.stop is not None:
+        if remaining > 1e-9 and mp.stop is not None:
             mp.qty = remaining
             mp.protection = self.executor.protect(mp.symbol, mp.is_long, remaining, mp.stop, mp.target, mp.label)
         return False

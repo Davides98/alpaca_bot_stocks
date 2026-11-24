@@ -49,7 +49,7 @@ create table if not exists public.stock_trades (
     status               text not null default 'OPEN' check (status in ('OPEN', 'CLOSED')),
     entry_price          numeric(14, 4) not null,
     exit_price           numeric(14, 4),
-    qty                  integer not null,
+    qty                  numeric(18, 6) not null,   -- azioni, anche frazionarie
     initial_stop         numeric(14, 4),
     stop_price           numeric(14, 4),
     take_profit          numeric(14, 4),

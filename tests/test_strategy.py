@@ -324,3 +324,10 @@ def test_settings_parsing():
     assert st.MAX_POSITION_PCT == pytest.approx(0.25)
     with pytest.raises(ValueError):
         Settings(_env_file=None, MAX_RISK_PER_TRADE_PCT=0.2)
+
+
+def test_position_size_fractional():
+    # 1.000 $: rischio 10 $ / 10,18 = 0,98 azioni; concentrazione 200 / 314,56 = 0,6358 -> 0,6358
+    assert position_size(1_000, 314.56, 10.18, 0.01, 0.20, 1_000, 1_000, fractional=True) == pytest.approx(0.6358)
+    assert position_size(1_000, 314.56, 10.18, 0.01, 0.20, 1_000, 1_000) == 0  # intere: nemmeno 1 azione
+    assert position_size(1_000, 500.0, 10.0, 0.01, 0.20, 0.4, fractional=True) == 0  # sotto 1 $ di controvalore

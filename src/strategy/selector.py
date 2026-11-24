@@ -152,9 +152,10 @@ def position_size(
     max_position_pct: float,
     exposure_room: float,
     buying_power: float | None = None,
-) -> int:
+    fractional: bool = False,
+) -> float:
     """
-    Numero di azioni = min(
+    Numero di azioni (intero, oppure con 4 decimali se `fractional`) = min(
         rischio massimo / rischio per azione,            # perdita allo stop <= risk_pct dell'equity
         equity x max_position_pct / prezzo,              # concentrazione massima
         spazio di esposizione lorda residuo / prezzo,    # niente leva oltre il limite
@@ -162,7 +163,7 @@ def position_size(
     )
     """
     if equity <= 0 or price <= 0 or risk_per_share <= 0:
-        return 0
+        return 0.0
     limits = [
         equity * risk_pct / risk_per_share,
         equity * max_position_pct / price,
@@ -170,7 +171,18 @@ def position_size(
     ]
     if buying_power is not None:
         limits.append(max(0.0, buying_power) * 0.98 / price)
-    return max(0, math.floor(min(limits)))
+    raw = max(0.0, min(limits))
+    if fractional:
+        qty = math.floor(raw * 10_000) / 10_000
+        return qty if qty * price >= MIN_FRACTIONAL_NOTIONAL else 0.0  # Alpaca: ordine frazionario minimo 1 $
+    return float(math.floor(raw))
+
+
+MIN_FRACTIONAL_NOTIONAL = 1.0
+
+
+def fmt_qty(qty: float) -> str:
+    return f"{qty:g}" if float(qty).is_integer() else f"{qty:.4f}".rstrip("0")
 
 
 # ---------------------------------------------------------------------- #
@@ -180,7 +192,7 @@ class TradePlan(BaseModel):
     ticker: str
     strategy: StrategyType
     side: str  # "long" | "short"
-    qty: int
+    qty: float  # intera, oppure frazionaria (4 decimali)
     ref_price: float  # prezzo al segnale
     stop_price: float
     take_profit: float
@@ -213,7 +225,7 @@ class TradePlan(BaseModel):
 
     def describe(self) -> str:
         return (
-            f"{self.ticker} {self.strategy.value} {self.side.upper()} x{self.qty} @ ~{self.ref_price:.2f} | "
+            f"{self.ticker} {self.strategy.value} {self.side.upper()} x{fmt_qty(self.qty)} @ ~{self.ref_price:.2f} | "
             f"stop {self.stop_price:.2f} (1R = {self.risk_per_share:.2f}) | target {self.take_profit:.2f} "
             f"({self.reward_risk:.1f}R) | controvalore ${self.notional:,.0f} | rischio ${self.max_loss:,.0f} | "
             f"uscita a tempo {self.max_holding_days} giorni"
@@ -260,6 +272,7 @@ class StrategySelector:
         equity: float,
         exposure_room: float,
         buying_power: float | None = None,
+        fractional: bool = False,
     ) -> TradePlan | None:
         s = self.s
         if strategy == StrategyType.NO_TRADE or not signal.triggered:
@@ -270,15 +283,17 @@ class StrategySelector:
                            regime.ticker, regime.bb_mid, s.MIN_REWARD_RISK)
             return None
         stop, target, risk = levels
-        qty = position_size(equity, regime.price, risk, s.MAX_RISK_PER_TRADE_PCT, s.MAX_POSITION_PCT, exposure_room, buying_power)
+        qty = position_size(equity, regime.price, risk, s.MAX_RISK_PER_TRADE_PCT, s.MAX_POSITION_PCT, exposure_room,
+                            buying_power, fractional)
         logger.info(
-            "{}: sizing -> rischio/azione {:.2f}, budget {:.1%} equity = ${:,.0f}, max posizione {:.0%}, "
-            "spazio esposizione ${:,.0f} -> qty {}",
+            "{}: sizing -> rischio/azione {:.2f}, budget {:.1%} equity = ${:,.2f}, max posizione {:.0%}, "
+            "spazio esposizione ${:,.0f} -> qty {}{} (${:,.2f})",
             regime.ticker, risk, s.MAX_RISK_PER_TRADE_PCT, equity * s.MAX_RISK_PER_TRADE_PCT, s.MAX_POSITION_PCT,
-            exposure_room, qty,
+            exposure_room, fmt_qty(qty), " frazionaria" if fractional else "", qty * regime.price,
         )
-        if qty < 1:
-            logger.warning("{}: nemmeno 1 azione rientra nei limiti di rischio/esposizione, scarto", regime.ticker)
+        if qty <= 0:
+            logger.warning("{}: quantità nulla nei limiti di rischio/esposizione{}, scarto", regime.ticker,
+                           "" if fractional else " (nemmeno 1 azione intera)")
             return None
         reward = abs(target - regime.price)
         plan = TradePlan(

@@ -125,7 +125,10 @@ class Settings(BaseSettings):
     MAX_GROSS_EXPOSURE_PCT: float = Field(default=1.0, gt=0, le=2.0)  # long + short in valore assoluto (1.0 = no leva)
     MAX_OPEN_POSITIONS: int = Field(default=5, ge=1, le=30)
     MAX_NEW_TRADES_PER_RUN: int = Field(default=2, ge=1, le=10)
-    ALLOW_SHORT: bool = True  # False = solo strategie long (le short diventano NO_TRADE)
+    ALLOW_SHORT: bool = True  # False = solo strategie long (disattivate in automatico se il conto non è a margine)
+    # Azioni frazionarie (conti piccoli): qty con 4 decimali. Alpaca le accetta solo con ordini DAY e senza OCO:
+    # lo stop resta lato broker (ricreato ogni giorno dal bot), il take profit lo esegue il bot.
+    FRACTIONAL_SHARES: bool = True
     STOP_LOSS_COOLDOWN_HOURS: int = Field(default=24, ge=0, le=240)
 
     # ------------------------------------------------------------------ #

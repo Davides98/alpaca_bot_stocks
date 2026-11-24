@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
-from alpaca.trading.enums import AssetClass, OrderClass, OrderSide, OrderStatus, OrderType, PositionSide
+from alpaca.trading.enums import AssetClass, OrderClass, OrderSide, OrderStatus, OrderType, PositionSide, TimeInForce
+from alpaca.trading.requests import StopOrderRequest
 
 from config.settings import Settings
 from src.execution.executor import OrderExecutor
@@ -39,7 +40,7 @@ class FakeTrading:
         return self.positions
 
     def get_asset(self, symbol):
-        return SimpleNamespace(tradable=True, shortable=True, easy_to_borrow=True)
+        return SimpleNamespace(tradable=True, shortable=True, easy_to_borrow=True, fractionable=True)
 
     def get_orders(self, req):
         if str(getattr(req.status, "value", req.status)) == "closed":
@@ -173,7 +174,7 @@ def test_live_cycle_opens_and_protects():
     market = FakeMarket({})
     price = breakout_price(market)
     market.prices = {"BRK": price, "FLAT": 100.0}
-    s, trading, storage = settings(DRY_RUN=False), FakeTrading(), FakeStorage()
+    s, trading, storage = settings(DRY_RUN=False, FRACTIONAL_SHARES=False), FakeTrading(), FakeStorage()
     trading_cycle(s, services(s, trading, storage, market), "run1", 100_000, 200_000, SessionStats())
     entry, oco = trading.submitted
     assert entry.side == OrderSide.BUY and entry.limit_price == pytest.approx(price)
@@ -254,3 +255,31 @@ def test_daily_bars_cache_downloads_once_per_day():
     assert list(svc.get_daily_bars(["AAA", "BBB"])) == ["AAA"]
     assert list(svc.get_daily_bars(["AAA", "BBB"])) == ["AAA"]  # tutto dalla cache, BBB non riprovato
     assert calls == [["AAA", "BBB"]]
+
+
+def test_small_account_fractional_entry_with_day_stop():
+    market = FakeMarket({})
+    price = breakout_price(market)
+    market.prices = {"BRK": price, "FLAT": 100.0}
+    s, trading, storage = settings(DRY_RUN=False), FakeTrading(), FakeStorage()
+    trading_cycle(s, services(s, trading, storage, market), "run1", 1_000, 1_000, SessionStats())
+    entry, stop = trading.submitted
+    assert not float(entry.qty).is_integer() and entry.qty * price <= 200 + 1e-6  # max 20% di 1.000 $
+    assert stop.type == OrderType.STOP and stop.time_in_force.value == "day" and stop.qty == entry.qty
+    row = storage.inserted[0]
+    assert row["details_json"]["protection"] == "STOP" and row["details_json"]["fractional"]
+
+
+def test_bot_take_profit_on_fractional_position():
+    market = FakeMarket({"BRK": 112.5})
+    trade = {"id": 11, "ticker": "BRK", "strategy": "BREAKOUT_LONG", "side": "LONG", "entry_price": 100, "qty": 1.5,
+             "initial_stop": 96, "stop_price": 96, "take_profit": 112, "risk_per_share": 4,
+             "created_at": datetime.now(timezone.utc).isoformat(), "details_json": {"atr": 2, "max_holding_days": 30}}
+    s = settings(DRY_RUN=False)
+    trading, storage = FakeTrading(positions=[_position("BRK", 1.5, 100, 112.5)]), FakeStorage([trade])
+    trading.submit_order(StopOrderRequest(symbol="BRK", qty=1.5, side=OrderSide.SELL, time_in_force=TimeInForce.DAY, stop_price=96))
+    report = services(s, trading, storage, market).risk.manage_open_positions(allow_dynamic=True)
+    assert report.open_count == 0
+    (tid, exit_price, pnl, reason), = storage.closed
+    assert (tid, reason) == (11, "TAKE_PROFIT") and pnl == pytest.approx(18.75)
+    assert trading.orders[next(iter(trading.orders))].status == OrderStatus.CANCELED  # stop cancellato prima della vendita

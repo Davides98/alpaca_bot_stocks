@@ -3,9 +3,11 @@ Modulo 5a - Esecuzione ordini (azioni).
 
 Regole:
 - MAI ordini Market: ingressi e uscite volontarie sono Limit DAY con price chasing, con un tetto di slippage.
-- Appena un ingresso viene eseguito, la posizione viene protetta LATO BROKER con un ordine OCO GTC:
-  take profit (limit) + stop loss (stop). Se il bot si ferma, Alpaca chiude comunque la posizione
-  al raggiungimento di una delle due soglie. Se l'OCO viene rifiutato si ripiega su un semplice stop GTC.
+- Appena un ingresso viene eseguito, la posizione viene protetta LATO BROKER:
+  * quantità intera -> OCO GTC: take profit (limit) + stop loss (stop). Se il bot si ferma, Alpaca chiude
+    comunque la posizione. Se l'OCO viene rifiutato si ripiega su un semplice stop GTC;
+  * quantità frazionaria -> Alpaca accetta solo ordini DAY senza OCO: stop DAY lato broker (il risk manager
+    lo ricrea ogni giorno all'apertura) e take profit eseguito dal bot al raggiungimento del target.
 - Chiusure volontarie (time stop, inversione di trend): prima si cancellano gli ordini di protezione
   (che "bloccano" le azioni), poi si invia la chiusura; se non viene eseguita, la protezione viene ripristinata.
 
@@ -78,8 +80,8 @@ def price_ladder(ref: float, worst: float, attempts: int) -> list[float]:
 
 @dataclass
 class ExecutionResult:
-    requested_qty: int
-    filled_qty: int = 0
+    requested_qty: float
+    filled_qty: float = 0.0
     avg_price: float | None = None
     order_id: str | None = None
     status: str = ""
@@ -89,7 +91,7 @@ class ExecutionResult:
 
     @property
     def filled(self) -> bool:
-        return self.filled_qty >= self.requested_qty > 0
+        return self.requested_qty > 0 and self.filled_qty >= self.requested_qty - 1e-9
 
 
 @dataclass
@@ -112,6 +114,8 @@ class OrderExecutor:
         self.client = trading_client
         self.s = settings
         self._shortable: dict[str, bool] = {}
+        self._fractionable: dict[str, bool] = {}
+        self._broker_stop_rejected: set[str] = set()  # simboli su cui Alpaca rifiuta lo stop frazionario (per la sessione)
 
     # ------------------------------------------------------------------ #
     # Informazioni sugli asset
@@ -126,20 +130,29 @@ class OrderExecutor:
                 self._shortable[symbol] = False
         return self._shortable[symbol]
 
+    def is_fractionable(self, symbol: str) -> bool:
+        if symbol not in self._fractionable:
+            try:
+                self._fractionable[symbol] = bool(getattr(self.client.get_asset(symbol), "fractionable", False))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("{}: impossibile verificare le frazioni ({})", symbol, exc)
+                self._fractionable[symbol] = False
+        return self._fractionable[symbol]
+
     # ------------------------------------------------------------------ #
     # Ingressi e uscite con price chasing
     # ------------------------------------------------------------------ #
-    def execute(self, symbol: str, side: OrderSide, qty: int, ref_price: float, label: str,
+    def execute(self, symbol: str, side: OrderSide, qty: float, ref_price: float, label: str,
                 slippage_pct: float, prefix: str = PREFIX_ENTRY) -> ExecutionResult:
         result = ExecutionResult(requested_qty=qty)
-        if qty < 1 or ref_price <= 0:
-            result.message = "Ordine vuoto (qty < 1 o prezzo non valido)"
+        if qty <= 0 or ref_price <= 0:
+            result.message = "Ordine vuoto (qty nulla o prezzo non valido)"
             return result
         worst = worst_price(ref_price, side, slippage_pct)
         ladder = price_ladder(ref_price, worst, self.s.MAX_CHASE_ATTEMPTS)
         result.ladder = ladder
         logger.info(
-            "[{}] Ordine LIMIT {} {} x{} | riferimento {:.2f} | chasing ({} tentativi ogni {}s): {} | peggiore {:.2f}",
+            "[{}] Ordine LIMIT {} {} x{:g} | riferimento {:.2f} | chasing ({} tentativi ogni {}s): {} | peggiore {:.2f}",
             label, side.value.upper(), symbol, qty, ref_price, len(ladder), self.s.CHASE_INTERVAL_SEC,
             " -> ".join(f"{p:.2f}" for p in ladder), worst,
         )
@@ -151,16 +164,16 @@ class OrderExecutor:
             return result
         return self._chase(symbol, side, qty, ladder, label, prefix, result)
 
-    def _limit_request(self, symbol: str, side: OrderSide, qty: int, price: float, prefix: str) -> LimitOrderRequest:
+    def _limit_request(self, symbol: str, side: OrderSide, qty: float, price: float, prefix: str) -> LimitOrderRequest:
         return LimitOrderRequest(
             symbol=symbol, qty=qty, side=side, type=OrderType.LIMIT,
             time_in_force=TimeInForce.DAY, limit_price=round(price, 2),
             client_order_id=new_client_id(prefix),
         )
 
-    def _chase(self, symbol: str, side: OrderSide, qty: int, ladder: list[float], label: str, prefix: str,
+    def _chase(self, symbol: str, side: OrderSide, qty: float, ladder: list[float], label: str, prefix: str,
                result: ExecutionResult) -> ExecutionResult:
-        filled_total, fill_value = 0, 0.0  # esecuzioni di ordini precedenti (cancel + nuovo ordine)
+        filled_total, fill_value = 0.0, 0.0  # esecuzioni di ordini precedenti (cancel + nuovo ordine)
         price = ladder[0]
         try:
             order = self.client.submit_order(self._limit_request(symbol, side, qty, price, prefix))
@@ -192,12 +205,12 @@ class OrderExecutor:
             except APIError as exc:
                 logger.info("[{}] Replace non disponibile ({}), uso cancel + nuovo ordine", label, str(exc)[:120])
                 old = self._cancel_and_wait(order_alive)
-                old_filled = int(float(old.filled_qty or 0))
+                old_filled = float(old.filled_qty or 0)
                 if old_filled:
                     filled_total += old_filled
                     fill_value += float(old.filled_avg_price or price) * old_filled
-                remaining = qty - filled_total
-                if remaining <= 0:
+                remaining = round(qty - filled_total, 6)
+                if remaining <= 1e-9:
                     order_alive = None
                     break
                 try:
@@ -208,7 +221,7 @@ class OrderExecutor:
                     break
 
         if order_alive is not None:
-            n = int(float(order_alive.filled_qty or 0))
+            n = float(order_alive.filled_qty or 0)
             if n:
                 filled_total += n
                 fill_value += float(order_alive.filled_avg_price or price) * n
@@ -219,10 +232,10 @@ class OrderExecutor:
         result.avg_price = round(fill_value / filled_total, 4) if filled_total else None
         if result.filled:
             result.status = "filled"
-            result.message = f"Eseguito {filled_total}/{qty} @ {result.avg_price:.2f}"
+            result.message = f"Eseguito {filled_total:g}/{qty:g} @ {result.avg_price:.2f}"
             logger.success("[{}] {}", label, result.message)
         elif filled_total:
-            result.message = f"Esecuzione PARZIALE {filled_total}/{qty} @ {result.avg_price:.2f}"
+            result.message = f"Esecuzione PARZIALE {filled_total:g}/{qty:g} @ {result.avg_price:.2f}"
             logger.warning("[{}] {}", label, result.message)
         elif result.status == "rejected":
             result.message = "Ordine RIFIUTATO da Alpaca (verifica buying power / shortabilità)"
@@ -234,13 +247,32 @@ class OrderExecutor:
     # ------------------------------------------------------------------ #
     # Protezione lato broker
     # ------------------------------------------------------------------ #
-    def protect(self, symbol: str, is_long: bool, qty: int, stop: float, take_profit: float | None, label: str) -> Protection:
-        """OCO GTC (take profit + stop); se rifiutato, solo stop GTC. Ritorna gli ordini creati."""
+    def protect(self, symbol: str, is_long: bool, qty: float, stop: float, take_profit: float | None, label: str) -> Protection:
+        """
+        Quantità intera: OCO GTC (take profit + stop); se rifiutato, solo stop GTC.
+        Quantità frazionaria: stop DAY (Alpaca non accetta GTC né OCO sulle frazioni); il target lo esegue il bot.
+        """
         exit_side = OrderSide.SELL if is_long else OrderSide.BUY
         if self.s.DRY_RUN:
             logger.warning("[{}] DRY_RUN: protezione NON inviata (stop {:.2f}, target {})", label, stop,
                            f"{take_profit:.2f}" if take_profit else "-")
             return Protection()
+        if not float(qty).is_integer():
+            if symbol in self._broker_stop_rejected:
+                return Protection()  # già rifiutato in questa sessione: stop gestito dal bot
+            try:
+                order = self.client.submit_order(StopOrderRequest(
+                    symbol=symbol, qty=qty, side=exit_side, time_in_force=TimeInForce.DAY,
+                    stop_price=round(stop, 2), client_order_id=new_client_id(PREFIX_STOP),
+                ))
+                logger.success("[{}] Stop DAY lato broker a {:.2f} (qty frazionaria {:g}); target {} gestito dal bot",
+                               label, stop, qty, f"{take_profit:.2f}" if take_profit else "-")
+                return Protection(stop_order_id=str(order.id), stop_price=stop)
+            except APIError as exc:
+                logger.warning("[{}] Stop frazionario rifiutato ({}): stop e target li esegue il bot ogni minuto",
+                               label, str(exc)[:200])
+                self._broker_stop_rejected.add(symbol)
+                return Protection()
         if take_profit:
             try:
                 order = self.client.submit_order(LimitOrderRequest(
@@ -300,7 +332,7 @@ class OrderExecutor:
         req = GetOrdersRequest(status=QueryOrderStatus.OPEN, nested=True, symbols=symbols or None, limit=500)
         return list(self.client.get_orders(req))
 
-    def replace_stop(self, prot: Protection, new_stop: float, symbol: str, is_long: bool, qty: int, label: str) -> Protection:
+    def replace_stop(self, prot: Protection, new_stop: float, symbol: str, is_long: bool, qty: float, label: str) -> Protection:
         """Sposta lo stop (solo in avanti). Prova il replace della gamba stop; se non riesce, ricrea la protezione."""
         if self.s.DRY_RUN:
             logger.warning("[{}] DRY_RUN: stop NON spostato ({} -> {:.2f})", label, prot.stop_price, new_stop)
@@ -342,7 +374,7 @@ class OrderExecutor:
         logger.warning("[{}] Alcuni ordini su {} risultano ancora aperti dopo la cancellazione", label, symbol)
         return False
 
-    def close_position(self, symbol: str, is_long: bool, qty: int, ref_price: float, label: str) -> ExecutionResult:
+    def close_position(self, symbol: str, is_long: bool, qty: float, ref_price: float, label: str) -> ExecutionResult:
         side = OrderSide.SELL if is_long else OrderSide.BUY
         if not self.s.DRY_RUN and not self.cancel_symbol_orders(symbol, label):
             return ExecutionResult(requested_qty=qty, status="blocked", message="ordini di protezione non cancellati")

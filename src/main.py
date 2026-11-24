@@ -38,7 +38,7 @@ from src.data.market_data import MarketDataService
 from src.execution.executor import OrderExecutor, Protection
 from src.execution.risk_manager import RiskManager
 from src.storage.supabase_client import SupabaseStorage
-from src.strategy.selector import StrategySelector, TradePlan, evaluate_signal
+from src.strategy.selector import StrategySelector, TradePlan, evaluate_signal, fmt_qty, is_short
 
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -95,7 +95,7 @@ def regime_snapshot(r: MarketRegime) -> dict[str, Any]:
     return out
 
 
-def plan_to_trade_row(plan: TradePlan, regime: MarketRegime, fill: float, qty: int, stop: float, target: float,
+def plan_to_trade_row(plan: TradePlan, regime: MarketRegime, fill: float, qty: float, stop: float, target: float,
                       order_id: str | None, prot: Protection, settings: Settings) -> dict[str, Any]:
     risk = abs(fill - stop)
     return {
@@ -120,7 +120,9 @@ def plan_to_trade_row(plan: TradePlan, regime: MarketRegime, fill: float, qty: i
             "max_holding_days": plan.max_holding_days,
             "rationale": plan.rationale,
             "signal": plan.signal_text,
-            "protection": "OCO" if prot.tp_order_id else ("STOP" if prot.active else "NONE"),
+            # OCO = stop + target lato broker | STOP = solo stop lato broker, target eseguito dal bot | BOT = tutto dal bot
+            "protection": "OCO" if prot.tp_order_id else ("STOP" if prot.active else "BOT"),
+            "fractional": not float(qty).is_integer(),
             "regime": regime_snapshot(regime),
             "exit_rules": exit_rules(settings),
             "stop_history": [],
@@ -320,7 +322,9 @@ def try_open(settings: Settings, svc: Services, cand: Candidate, equity: float, 
     if not signal.triggered:
         return f"segnale svanito al prezzo aggiornato ({signal.text})", 0.0, False
 
-    plan = svc.selector.build_plan(regime, cand.strategy, signal, equity, exposure_room, buying_power)
+    # Frazioni solo per i long su titoli "fractionable" (Alpaca non permette short frazionari)
+    fractional = settings.FRACTIONAL_SHARES and not is_short(cand.strategy) and svc.executor.is_fractionable(ticker)
+    plan = svc.selector.build_plan(regime, cand.strategy, signal, equity, exposure_room, buying_power, fractional)
     if plan is None:
         return "nessun piano valido (rischio/rendimento o limiti di esposizione)", 0.0, False
 
@@ -328,7 +332,7 @@ def try_open(settings: Settings, svc: Services, cand: Candidate, equity: float, 
     side = OrderSide.BUY if plan.is_long else OrderSide.SELL
     result = svc.executor.execute(ticker, side, plan.qty, plan.ref_price, label, settings.MAX_ENTRY_SLIPPAGE_PCT)
     if result.dry_run:
-        return (f"{plan.side.upper()} x{plan.qty} (DRY_RUN, non inviato) | stop {plan.stop_price:.2f} | "
+        return (f"{plan.side.upper()} x{fmt_qty(plan.qty)} (DRY_RUN, non inviato, ${plan.notional:,.2f}) | stop {plan.stop_price:.2f} | "
                 f"target {plan.take_profit:.2f} ({plan.reward_risk:.1f}R)"), 0.0, False
     if result.filled_qty <= 0 or result.avg_price is None:
         return f"NON eseguito: {result.message}", 0.0, False
@@ -339,7 +343,7 @@ def try_open(settings: Settings, svc: Services, cand: Candidate, equity: float, 
         logger.error("[{}] posizione aperta SENZA protezione: il risk manager riproverà al prossimo controllo", label)
     svc.storage.insert_trade(plan_to_trade_row(plan, regime, result.avg_price, result.filled_qty, stop, target,
                                                result.order_id, prot, settings))
-    return (f"ESEGUITO {plan.side.upper()} {result.filled_qty} @ {result.avg_price:.2f} | stop {stop:.2f} | "
+    return (f"ESEGUITO {plan.side.upper()} {fmt_qty(result.filled_qty)} @ {result.avg_price:.2f} | stop {stop:.2f} | "
             f"target {target:.2f}"), result.avg_price * result.filled_qty, True
 
 
