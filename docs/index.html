@@ -431,43 +431,62 @@
     const configured = problem === null;
 
     // ------------------------------------------------------------------ //
-    // Dati
+    // Dati (caricamento INCREMENTALE: lo storico si scarica una volta, poi solo le righe nuove)
     // ------------------------------------------------------------------ //
-    async function fetchAllSnapshots() {
+    // Solo le colonne usate dalla pagina: meno dati scaricati da Supabase
+    const SNAP_COLS = "timestamp,equity,initial_capital,total_return_usd,total_return_pct,daily_pnl,long_market_value,short_market_value";
+
+    async function fetchSnapshots(since) {
       const pageSize = 1000;
       let from = 0, rows = [];
       while (true) {
-        const { data, error } = await db.from("stock_equity_snapshots").select("*")
-          .order("timestamp", { ascending: true }).range(from, from + pageSize - 1);
+        let q = db.from("stock_equity_snapshots").select(SNAP_COLS);
+        if (since) q = q.gt("timestamp", since);
+        const { data, error } = await q.order("timestamp", { ascending: true }).range(from, from + pageSize - 1);
         if (error) throw error;
         rows = rows.concat(data);
         if (data.length < pageSize) break;
         from += pageSize;
       }
-      return rows;
+      return rows.map((r) => ({ ...r, t: new Date(r.timestamp) }));
     }
 
+    // Trade: al primo caricamento gli ultimi 500, poi solo quelli modificati dopo l'ultimo aggiornamento visto
+    async function fetchTrades(sinceUpdated) {
+      let q = db.from("stock_trades").select("*");
+      q = sinceUpdated ? q.gt("updated_at", sinceUpdated) : q.order("created_at", { ascending: false }).limit(500);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data;
+    }
+    function mergeTrades(current, changed) {
+      const byId = new Map(current.map((t) => [t.id, t]));
+      for (const t of changed) byId.set(t.id, t);
+      return [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+    const maxUpdated = (trades) => trades.reduce((m, t) => (t.updated_at > m ? t.updated_at : m), "");
+
     async function fetchLatestScreening() {
-      const { data: last, error } = await db.from("stock_screening_logs").select("run_id,timestamp")
+      const { data: last, error } = await db.from("stock_screening_logs").select("timestamp")
         .order("timestamp", { ascending: false }).limit(1);
       if (error) throw error;
       if (!last.length) return [];
-      // Tutte le righe di un ciclo hanno lo stesso timestamp. Non filtro per run_id: in modalità sessione
-      // il run_id resta uguale per tutta la giornata e mostrerebbe tutti i cicli insieme.
+      if (state.screening[0]?.timestamp === last[0].timestamp) return state.screening;  // nessun ciclo nuovo
+      // Tutte le righe di un ciclo hanno lo stesso timestamp
       const { data, error: e2 } = await db.from("stock_screening_logs").select("*")
         .eq("timestamp", last[0].timestamp).order("opportunity_score", { ascending: false });
       if (e2) throw e2;
       return data;
     }
 
-    // Ultimo run registrato dal bot (tabella bot_runs). Se la tabella non esiste ancora, ritorna null.
+    // Ultimo run registrato dal bot (tabella stock_bot_runs). Se la tabella non esiste ancora, ritorna null.
     async function fetchLastRun() {
       const { data, error } = await db.from("stock_bot_runs").select("*").order("timestamp", { ascending: false }).limit(1);
       if (error) { console.warn("bot_runs non disponibile:", error.message); return null; }
       return data[0] ? { ...data[0], t: new Date(data[0].timestamp) } : null;
     }
 
-    // Stato attuale del bot (tabella bot_status, una riga). Se la tabella non esiste ancora, ritorna null.
+    // Stato attuale del bot (tabella stock_bot_status, una riga). Se la tabella non esiste ancora, ritorna null.
     async function fetchBotStatus() {
       const { data, error } = await db.from("stock_bot_status").select("*").eq("id", 1).maybeSingle();
       state.botStatusMissing = !!error;
@@ -475,21 +494,27 @@
       return data;
     }
 
+    let loading = false;
     async function loadAll() {
+      if (loading) return;
+      loading = true;
       try {
-        const [snapshots, tradesRes, screening, lastRun, botStatus] = await Promise.all([
-          fetchAllSnapshots(),
-          db.from("stock_trades").select("*").order("created_at", { ascending: false }).limit(500),
+        const first = !state.loaded;
+        const lastSnap = state.snapshots.at(-1)?.timestamp;
+        const [snapshots, trades, screening, lastRun, botStatus] = await Promise.all([
+          fetchSnapshots(first ? null : lastSnap),
+          fetchTrades(first ? null : state.tradesUpdatedAt),
           fetchLatestScreening(),
           fetchLastRun(),
           fetchBotStatus(),
         ]);
-        if (tradesRes.error) throw tradesRes.error;
-        state.snapshots = snapshots.map((r) => ({ ...r, t: new Date(r.timestamp) }));
-        state.trades = tradesRes.data;
+        state.snapshots = first ? snapshots : state.snapshots.concat(snapshots);
+        state.trades = first ? trades : mergeTrades(state.trades, trades);
+        state.tradesUpdatedAt = maxUpdated(state.trades) || state.tradesUpdatedAt;
         state.screening = screening;
         state.lastRun = lastRun;
         state.botStatus = botStatus;
+        state.loaded = true;
         $("errorBanner").classList.add("hidden");
         renderAll();
       } catch (err) {
@@ -497,7 +522,19 @@
         const box = $("errorBanner");
         box.innerHTML = `<strong>Errore nel caricamento dei dati.</strong> <span class="t2">${esc(err.message || err)}</span>`;
         box.classList.remove("hidden");
+      } finally {
+        loading = false;
       }
+    }
+
+    // Per il grafico: al massimo `max` punti (uno per intervallo, sempre incluso l'ultimo), così anche anni di
+    // snapshot al minuto restano veloci da disegnare
+    function downsample(rows, max = 2000) {
+      if (rows.length <= max) return rows;
+      const step = rows.length / max, out = [];
+      for (let i = 0; i < max; i++) out.push(rows[Math.floor(i * step)]);
+      out[out.length - 1] = rows.at(-1);
+      return out;
     }
 
     // ------------------------------------------------------------------ //
@@ -584,7 +621,8 @@
     }
 
     function renderChart() {
-      const rows = visibleSnapshots();
+      const all = visibleSnapshots();
+      const rows = downsample(all);  // il grafico disegna al massimo 2000 punti
       const isPct = state.unit === "pct";
       // Etichette dell'asse X: ora se i dati coprono meno di 1,5 giorni, data+ora fino a 10 giorni, altrimenti data
       const spanH = rows.length > 1 ? (rows.at(-1).t - rows[0].t) / 3_600_000 : 0;
@@ -651,7 +689,7 @@
       if (chart) { chart.data = data; chart.options = options; chart.update(); }
       else chart = new Chart($("equityChart"), { type: "line", data, options, plugins: [crosshair, baseline] });
 
-      $("equityTable").innerHTML = rows.slice().reverse().slice(0, 200).map((r) => `
+      $("equityTable").innerHTML = all.slice(-200).reverse().map((r) => `
         <tr><td class="num">${dtFmt.format(r.t)}</td>
         <td class="r num">${usd.format(Number(r.equity))}</td>
         <td class="r num ${cls(Number(r.total_return_pct))}">${fmtPct(Number(r.total_return_pct))}</td>
@@ -1288,7 +1326,6 @@
       db.channel("stock-bot-updates")
         .on("postgres_changes", { event: "*", schema: "public", table: "stock_equity_snapshots" }, scheduleReload)
         .on("postgres_changes", { event: "*", schema: "public", table: "stock_trades" }, scheduleReload)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "stock_screening_logs" }, scheduleReload)
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "stock_bot_runs" }, scheduleReload)
         .on("postgres_changes", { event: "*", schema: "public", table: "stock_bot_status" }, (payload) => {
           if (payload.new && payload.new.id === 1) { state.botStatus = payload.new; renderClocks(); }
